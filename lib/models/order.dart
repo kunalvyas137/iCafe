@@ -20,6 +20,16 @@ class OrderItem {
     required this.gstRate,
   });
 
+  OrderItem copyWith({int? quantity}) {
+    return OrderItem(
+      productId: productId,
+      productName: productName,
+      price: price,
+      quantity: quantity ?? this.quantity,
+      gstRate: gstRate,
+    );
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'productId': productId,
