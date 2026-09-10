@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(flutter analyze)",
+      "Exec(flutter build)",
+      "Exec(flutter run)",
+      "Exec(osascript)",
+      "Exec(security find-identity)",
+      "Exec(head)",
+      "Exec(flutter)",
+      "Exec(xcrun xcodebuild)"
+    ]
+  }
+}

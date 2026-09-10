@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "910693440390",
+    "project_id": "icafe-29a92",
+    "storage_bucket": "icafe-29a92.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:910693440390:android:209ce8f35b5bebfc57aa07",
+        "android_client_info": {
+          "package_name": "com.example.icafe"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzIuw-eHuHY21ihJ2XH7Ha98exGWqxpxY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:910693440390:android:882aba550da81ed757aa07",
+        "android_client_info": {
+          "package_name": "com.icafe.icafe"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzIuw-eHuHY21ihJ2XH7Ha98exGWqxpxY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
