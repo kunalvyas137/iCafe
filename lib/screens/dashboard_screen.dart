@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'pos_screen.dart';
 import 'inventory_screen.dart';
+import 'orders_screen.dart';
 import 'reports_screen.dart';
 import 'settings_screen.dart';
 import '../models/user.dart';
@@ -29,10 +30,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (doc.exists) {
         setState(() {
-          _userRole = doc.data()?['role'] == 'admin' ? UserRole.admin : UserRole.staff;
+          _userRole = doc.data()?['role'] == 'admin'
+              ? UserRole.admin
+              : UserRole.staff;
           _isLoading = false;
         });
       } else {
@@ -92,7 +98,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () {
               FirebaseAuth.instance.signOut();
             },
-          )
+          ),
         ],
       ),
       body: Row(
@@ -110,9 +116,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const VerticalDivider(thickness: 1, width: 1),
           // Main Content Area
-          Expanded(
-            child: _buildMainContent(isAdmin),
-          ),
+          Expanded(child: _buildMainContent(isAdmin)),
         ],
       ),
     );
@@ -128,7 +132,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         case 1:
           return const InventoryScreen();
         case 2:
-          return const Center(child: Text('Orders History'));
+          return const OrdersScreen(canCancel: true);
         case 3:
           return const ReportsScreen();
         case 4:
@@ -141,7 +145,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         case 0:
           return const PosScreen();
         case 1:
-          return const Center(child: Text('Orders History'));
+          return const OrdersScreen();
         default:
           return const Center(child: Text('Unknown Screen'));
       }

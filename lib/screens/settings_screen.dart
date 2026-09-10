@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/printer_provider.dart';
+import '../services/printer_service.dart';
+import '../services/settings_service.dart';
+import 'store_profile_screen.dart';
 import 'user_management_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -11,6 +14,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  bool _isTestPrinting = false;
+
   @override
   void initState() {
     super.initState();
@@ -18,6 +23,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PrinterProvider>().scanPrinters();
     });
+  }
+
+  Future<void> _testPrint() async {
+    final printerProvider = context.read<PrinterProvider>();
+    setState(() => _isTestPrinting = true);
+    try {
+      final store = await SettingsService.load();
+      final bytes = await PrinterService.generateTestTicket(store: store);
+      final printed = await printerProvider.printBytes(bytes);
+      if (!mounted) return;
+      _showMessage(
+        printed
+            ? 'Test receipt sent to the printer.'
+            : 'The printer did not accept the test receipt. Reconnect and try again.',
+        isError: !printed,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Test print failed: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isTestPrinting = false);
+    }
+  }
+
+  void _showMessage(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
   }
 
   @override
@@ -47,6 +83,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.storefront),
+                title: const Text('Store profile'),
+                subtitle: const Text(
+                  'Receipt header, UPI ID and default GST rate',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const StoreProfileScreen()),
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
             const Text(
               'Bluetooth POS Printers',
@@ -60,16 +110,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? null
                       : () => printerProvider.scanPrinters(),
                   icon: const Icon(Icons.refresh),
-                  label: Text(printerProvider.isScanning ? 'Scanning...' : 'Scan for Printers'),
+                  label: Text(
+                    printerProvider.isScanning
+                        ? 'Scanning...'
+                        : 'Scan for Printers',
+                  ),
                 ),
                 const SizedBox(width: 16),
-                if (printerProvider.isConnected)
+                if (printerProvider.isConnected) ...[
+                  ElevatedButton.icon(
+                    onPressed: _isTestPrinting ? null : _testPrint,
+                    icon: const Icon(Icons.receipt_long),
+                    label: Text(_isTestPrinting ? 'Printing...' : 'Test print'),
+                  ),
+                  const SizedBox(width: 16),
                   ElevatedButton.icon(
                     onPressed: () => printerProvider.disconnectPrinter(),
                     icon: const Icon(Icons.bluetooth_disabled),
                     label: const Text('Disconnect'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
+                ],
               ],
             ),
             const SizedBox(height: 16),
@@ -87,7 +151,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(width: 8),
                     Text(
                       'Connected to: ${printerProvider.connectedMac}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (!printerProvider.isConnected &&
+                printerProvider.rememberedMac.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.history, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Last used printer: ${printerProvider.rememberedMac}',
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => printerProvider.connectPrinter(
+                        printerProvider.rememberedMac,
+                      ),
+                      child: const Text('Reconnect'),
+                    ),
+                    TextButton(
+                      onPressed: () => printerProvider.forgetPrinter(),
+                      child: const Text('Forget'),
                     ),
                   ],
                 ),
@@ -97,16 +195,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Card(
                 elevation: 4,
                 child: printerProvider.availablePrinters.isEmpty
-                    ? const Center(child: Text('No printers found. Make sure Bluetooth is on and paired.'))
+                    ? const Center(
+                        child: Text(
+                          'No printers found. Make sure Bluetooth is on and paired.',
+                        ),
+                      )
                     : ListView.builder(
                         itemCount: printerProvider.availablePrinters.length,
                         itemBuilder: (context, index) {
-                          final printer = printerProvider.availablePrinters[index];
-                          final isThisConnected = printerProvider.connectedMac == printer.macAdress;
+                          final printer =
+                              printerProvider.availablePrinters[index];
+                          final isThisConnected =
+                              printerProvider.connectedMac == printer.macAdress;
 
                           return ListTile(
                             leading: const Icon(Icons.print),
-                            title: Text(printer.name.isEmpty ? 'Unknown Device' : printer.name),
+                            title: Text(
+                              printer.name.isEmpty
+                                  ? 'Unknown Device'
+                                  : printer.name,
+                            ),
                             subtitle: Text(printer.macAdress),
                             trailing: isThisConnected
                                 ? const Chip(
@@ -115,7 +223,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     labelStyle: TextStyle(color: Colors.white),
                                   )
                                 : ElevatedButton(
-                                    onPressed: () => printerProvider.connectPrinter(printer.macAdress),
+                                    onPressed: () => printerProvider
+                                        .connectPrinter(printer.macAdress),
                                     child: const Text('Connect'),
                                   ),
                           );
