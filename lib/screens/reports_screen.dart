@@ -56,8 +56,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
             return const Center(child: Text('No orders found to generate analytics.'));
           }
 
-          final allOrders = snapshot.data!.docs;
-          
+          // Cancelled orders were refunded, so they must not show as revenue.
+          final allOrders = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['status'] != 'cancelled';
+          }).toList();
+
           // Filter by date range if selected
           final filteredOrders = _selectedDateRange == null 
               ? allOrders 

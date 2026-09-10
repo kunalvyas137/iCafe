@@ -74,6 +74,10 @@ class CafeOrder {
   final String? customerName;
   final String? cashierId;
 
+  final DateTime? cancelledAt;
+  final String? cancelledBy;
+  final String? cancelReason;
+
   CafeOrder({
     required this.id,
     required this.timestamp,
@@ -90,11 +94,19 @@ class CafeOrder {
     this.tableLabel,
     this.customerName,
     this.cashierId,
+    this.cancelledAt,
+    this.cancelledBy,
+    this.cancelReason,
   });
 
   /// Human-friendly reference such as `#014`, reset every day.
   String get displayNumber =>
       orderNumber > 0 ? '#${orderNumber.toString().padLeft(3, '0')}' : '#$id';
+
+  bool get isCancelled => status == OrderStatus.cancelled;
+
+  /// Cancelled orders are excluded from every revenue figure.
+  bool get countsTowardsSales => status == OrderStatus.completed;
 
   double? get changeDue {
     final tendered = cashTendered;
@@ -133,6 +145,9 @@ class CafeOrder {
       if (tableLabel != null) 'tableLabel': tableLabel,
       if (customerName != null) 'customerName': customerName,
       if (cashierId != null) 'cashierId': cashierId,
+      if (cancelledAt != null) 'cancelledAt': cancelledAt!.toIso8601String(),
+      if (cancelledBy != null) 'cancelledBy': cancelledBy,
+      if (cancelReason != null) 'cancelReason': cancelReason,
     };
   }
 
@@ -161,6 +176,11 @@ class CafeOrder {
       tableLabel: map['tableLabel'] as String?,
       customerName: map['customerName'] as String?,
       cashierId: map['cashierId'] as String?,
+      cancelledAt: map['cancelledAt'] == null
+          ? null
+          : DateTime.tryParse(map['cancelledAt'] as String),
+      cancelledBy: map['cancelledBy'] as String?,
+      cancelReason: map['cancelReason'] as String?,
     );
   }
 }

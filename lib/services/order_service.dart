@@ -187,6 +187,128 @@ class OrderService {
     });
   }
 
+  /// Orders placed inside [day], newest first.
+  static Stream<List<CafeOrder>> watchDay(DateTime day) {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = start.add(const Duration(days: 1));
+    return _db
+        .collection('orders')
+        .where('timestamp', isGreaterThanOrEqualTo: start.toIso8601String())
+        .where('timestamp', isLessThan: end.toIso8601String())
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map((doc) => CafeOrder.fromMap(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
+  /// Voids an order and puts the stock it consumed back, in one transaction so
+  /// an order can never be marked cancelled without its stock returning.
+  static Future<CafeOrder> cancelOrder(
+    CafeOrder order, {
+    required String reason,
+    DateTime? now,
+  }) async {
+    if (order.isCancelled) {
+      throw CheckoutException('This order is already cancelled.');
+    }
+
+    final orderRef = _db.collection('orders').doc(order.id);
+
+    return _db.runTransaction<CafeOrder>((transaction) async {
+      final orderSnap = await transaction.get(orderRef);
+      final data = orderSnap.data();
+      if (data == null) {
+        throw CheckoutException('This order no longer exists.');
+      }
+      final current = CafeOrder.fromMap(data, orderSnap.id);
+      if (current.isCancelled) {
+        throw CheckoutException('This order is already cancelled.');
+      }
+
+      final productSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      for (final item in current.items) {
+        productSnaps[item.productId] ??= await transaction.get(
+          _db.collection('products').doc(item.productId),
+        );
+      }
+
+      final recipes = <String, Recipe>{};
+      for (final entry in productSnaps.entries) {
+        final productData = entry.value.data();
+        if (productData == null) continue;
+        if (productData['type'] != ProductType.inHouse.name) continue;
+        final recipeSnap = await transaction.get(
+          _db.collection('recipes').doc(entry.key),
+        );
+        final recipeData = recipeSnap.data();
+        if (recipeData != null) {
+          recipes[entry.key] = Recipe.fromMap(recipeData, recipeSnap.id);
+        }
+      }
+
+      final materialReturns = <String, double>{};
+      for (final item in current.items) {
+        final recipe = recipes[item.productId];
+        if (recipe == null) continue;
+        for (final ingredient in recipe.ingredients) {
+          materialReturns.update(
+            ingredient.rawMaterialId,
+            (value) => value + ingredient.quantity * item.quantity,
+            ifAbsent: () => ingredient.quantity * item.quantity,
+          );
+        }
+      }
+
+      final cancelled = CafeOrder(
+        id: current.id,
+        timestamp: current.timestamp,
+        items: current.items,
+        subtotal: current.subtotal,
+        totalGst: current.totalGst,
+        grandTotal: current.grandTotal,
+        paymentMethod: current.paymentMethod,
+        status: OrderStatus.cancelled,
+        orderNumber: current.orderNumber,
+        dayKey: current.dayKey,
+        cashTendered: current.cashTendered,
+        notes: current.notes,
+        tableLabel: current.tableLabel,
+        customerName: current.customerName,
+        cashierId: current.cashierId,
+        cancelledAt: now ?? DateTime.now(),
+        cancelledBy: FirebaseAuth.instance.currentUser?.uid,
+        cancelReason: reason.trim(),
+      );
+
+      transaction.update(orderRef, {
+        'status': OrderStatus.cancelled.name,
+        'cancelledAt': cancelled.cancelledAt!.toIso8601String(),
+        if (cancelled.cancelledBy != null) 'cancelledBy': cancelled.cancelledBy,
+        'cancelReason': cancelled.cancelReason,
+      });
+
+      for (final item in current.items) {
+        final productData = productSnaps[item.productId]?.data();
+        if (productData == null) continue;
+        if (productData['type'] != ProductType.mrp.name) continue;
+        transaction.update(_db.collection('products').doc(item.productId), {
+          'currentStock': FieldValue.increment(item.quantity),
+        });
+      }
+
+      materialReturns.forEach((materialId, quantity) {
+        transaction.update(_db.collection('raw_materials').doc(materialId), {
+          'currentStock': FieldValue.increment(quantity),
+        });
+      });
+
+      return cancelled;
+    });
+  }
+
   static String? _trimToNull(String? value) {
     final trimmed = value?.trim();
     return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
