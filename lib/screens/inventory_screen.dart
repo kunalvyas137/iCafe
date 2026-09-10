@@ -6,6 +6,7 @@ import '../models/recipe.dart';
 import '../models/store_settings.dart';
 import '../services/ai_inventory_service.dart';
 import '../services/inventory_service.dart';
+import '../services/invoice_matcher.dart';
 import '../services/settings_service.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -98,12 +99,50 @@ class _InventoryScreenState extends State<InventoryScreen>
   }
 
   Future<void> _scanInvoice() async {
+    if (!AiInventoryService.isConfigured) {
+      _showMessage(
+        'Invoice scanning needs a Gemini key: rebuild with '
+        '--dart-define=GEMINI_API_KEY=<key>.',
+        isError: true,
+      );
+      return;
+    }
+
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
     if (image == null) return;
-    _showMessage('Analyzing invoice with AI...');
-    await AiInventoryService.scanInvoice(image);
-    _showMessage('Inventory updated from invoice!');
+
+    _showMessage('Reading the invoice with AI...');
+    List<ParsedInvoiceLine> lines;
+    try {
+      lines = await AiInventoryService.scanInvoice(image);
+    } on AiInvoiceException catch (e) {
+      _showMessage(e.message, isError: true);
+      return;
+    } catch (e) {
+      _showMessage('Could not read the invoice: $e', isError: true);
+      return;
+    }
+    if (!mounted) return;
+
+    final receipts = await showDialog<List<StockReceipt>>(
+      context: context,
+      builder: (_) => _InvoiceReviewDialog(lines: lines),
+    );
+    if (receipts == null || receipts.isEmpty) return;
+
+    try {
+      final created = await InventoryService.receiveStock(receipts);
+      _showMessage(
+        created == 0
+            ? 'Stock updated for ${receipts.length} materials.'
+            : 'Stock updated for ${receipts.length} materials, $created newly added.',
+      );
+    } on InventoryException catch (e) {
+      _showMessage(e.message, isError: true);
+    } catch (e) {
+      _showMessage('Could not update stock: $e', isError: true);
+    }
   }
 
   Future<void> _editProduct([Product? existing]) async {
@@ -1028,6 +1067,190 @@ class _RecipeDialogState extends State<_RecipeDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(onPressed: _submit, child: const Text('Save recipe')),
+      ],
+    );
+  }
+}
+
+/// Lets the operator confirm what the AI read before any stock moves: each
+/// line can be matched to an existing material, booked as a new one, or
+/// dropped.
+class _InvoiceReviewDialog extends StatefulWidget {
+  const _InvoiceReviewDialog({required this.lines});
+
+  final List<ParsedInvoiceLine> lines;
+
+  @override
+  State<_InvoiceReviewDialog> createState() => _InvoiceReviewDialogState();
+}
+
+class _InvoiceReviewDialogState extends State<_InvoiceReviewDialog> {
+  final _quantities = <int, TextEditingController>{};
+  final _matches = <int, String?>{};
+  final _include = <int, bool>{};
+  List<RawMaterial> _materials = [];
+  bool _matched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (var i = 0; i < widget.lines.length; i++) {
+      _quantities[i] = TextEditingController(
+        text: widget.lines[i].quantity.toString(),
+      );
+      _include[i] = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _quantities.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _applySuggestions(List<RawMaterial> materials) {
+    _materials = materials;
+    if (_matched) return;
+    _matched = true;
+    for (var i = 0; i < widget.lines.length; i++) {
+      _matches[i] = matchMaterial(widget.lines[i], materials)?.id;
+    }
+  }
+
+  void _submit() {
+    final receipts = <StockReceipt>[];
+    for (var i = 0; i < widget.lines.length; i++) {
+      if (_include[i] != true) continue;
+      final quantity = double.tryParse(_quantities[i]!.text.trim()) ?? 0;
+      if (quantity <= 0) continue;
+      final line = widget.lines[i];
+      final materialId = _matches[i];
+      receipts.add(
+        StockReceipt(
+          name: line.name,
+          quantity: quantity,
+          unit: line.unit.isEmpty ? 'pcs' : line.unit,
+          materialId: materialId,
+          reason: 'Invoice scan',
+        ),
+      );
+    }
+    if (receipts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one line to receive.')),
+      );
+      return;
+    }
+    Navigator.of(context).pop(receipts);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Receive stock from invoice'),
+      content: SizedBox(
+        width: 640,
+        child: StreamBuilder<List<RawMaterial>>(
+          stream: InventoryService.watchRawMaterials(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData && _materials.isEmpty) {
+              return const SizedBox(
+                height: 120,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            _applySuggestions(snapshot.data ?? _materials);
+
+            return ListView.separated(
+              shrinkWrap: true,
+              itemCount: widget.lines.length,
+              separatorBuilder: (context, index) => const Divider(height: 16),
+              itemBuilder: (context, index) {
+                final line = widget.lines[index];
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Checkbox(
+                      value: _include[index] ?? true,
+                      onChanged: (value) =>
+                          setState(() => _include[index] = value ?? false),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            line.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          if (line.unitPrice != null)
+                            Text(
+                              '₹${line.unitPrice!.toStringAsFixed(2)} per ${line.unit.isEmpty ? "unit" : line.unit}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _quantities[index],
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Qty',
+                          suffixText: line.unit.isEmpty ? null : line.unit,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 3,
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: _matches[index],
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Add to material',
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Create new material'),
+                          ),
+                          for (final material in _materials)
+                            DropdownMenuItem<String?>(
+                              value: material.id,
+                              child: Text(
+                                '${material.name} (${material.unit})',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _matches[index] = value),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Receive stock')),
       ],
     );
   }
