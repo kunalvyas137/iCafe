@@ -11,6 +11,20 @@ flutter pub get
 flutter run -d macos
 ```
 
+### Invoice scanning (optional)
+
+**Inventory → Scan Invoice** reads a vendor invoice with Gemini and offers the
+line items for receiving into raw-material stock. The key is compiled in, never
+committed:
+
+```bash
+flutter run -d macos --dart-define=GEMINI_API_KEY=<your key>
+flutter build macos --dart-define=GEMINI_API_KEY=<your key>
+```
+
+Without the key the feature is disabled and says so; the rest of the app is
+unaffected.
+
 ## Firestore security rules
 
 `firestore.rules` grants access by role, read from the signed-in user's

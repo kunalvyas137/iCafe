@@ -13,6 +13,24 @@ class InventoryException implements Exception {
   String toString() => message;
 }
 
+/// A single delivered line: added to [materialId], or booked as a new
+/// material when it is null.
+class StockReceipt {
+  const StockReceipt({
+    required this.name,
+    required this.quantity,
+    required this.unit,
+    this.materialId,
+    this.reason,
+  });
+
+  final String name;
+  final double quantity;
+  final String unit;
+  final String? materialId;
+  final String? reason;
+}
+
 class InventoryService {
   static FirebaseFirestore get _db => FirebaseFirestore.instance;
 
@@ -86,6 +104,40 @@ class InventoryService {
     return _materials
         .doc(material.id)
         .update(material.toMap()..['id'] = material.id);
+  }
+
+  /// Books a delivery: adds to the stock of each existing material, and
+  /// creates the ones that were left unmatched. Returns how many materials
+  /// were created so the caller can report it.
+  static Future<int> receiveStock(List<StockReceipt> receipts) async {
+    if (receipts.isEmpty) {
+      throw InventoryException('Nothing to receive.');
+    }
+
+    var created = 0;
+    for (final receipt in receipts) {
+      if (receipt.quantity <= 0) continue;
+      final materialId = receipt.materialId;
+      if (materialId == null) {
+        await createRawMaterial(
+          RawMaterial(
+            id: '',
+            name: receipt.name,
+            unit: receipt.unit,
+            currentStock: receipt.quantity,
+            reorderLevel: 0,
+          ),
+        );
+        created++;
+      } else {
+        await adjustRawMaterialStock(
+          materialId,
+          receipt.quantity,
+          reason: receipt.reason,
+        );
+      }
+    }
+    return created;
   }
 
   /// Applies a signed [delta] to stock. Reading inside a transaction keeps a
