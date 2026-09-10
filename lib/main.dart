@@ -49,7 +49,9 @@ class ICafeApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => CartProvider()),
-        ChangeNotifierProvider(create: (_) => PrinterProvider()),
+        ChangeNotifierProvider(
+          create: (_) => PrinterProvider()..restoreLastPrinter(),
+        ),
       ],
       child: MaterialApp(
         title: 'iCafe POS',
@@ -58,9 +60,7 @@ class ICafeApp extends StatelessWidget {
           useMaterial3: true,
           colorSchemeSeed: Colors.amber,
           textTheme: GoogleFonts.latoTextTheme(),
-          appBarTheme: const AppBarTheme(
-            centerTitle: false,
-          ),
+          appBarTheme: const AppBarTheme(centerTitle: false),
         ),
         home: const AuthGate(),
       ),
