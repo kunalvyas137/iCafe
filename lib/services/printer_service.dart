@@ -4,6 +4,7 @@ import 'package:esc_pos_utils/esc_pos_utils.dart';
 import 'package:image/image.dart' as img;
 import '../models/order.dart';
 import '../models/store_settings.dart';
+import 'sales_report.dart';
 
 class PrinterService {
   /// Generates the ESC/POS ticket (bytes) for a given CafeOrder.
@@ -171,6 +172,97 @@ class PrinterService {
         styles: const PosStyles(align: PosAlign.center, bold: true),
       );
     }
+    bytes += generator.feed(2);
+    bytes += generator.cut();
+
+    return bytes;
+  }
+
+  /// End-of-day summary ticket: totals, payment split and GST for [label].
+  static Future<List<int>> generateSalesReportTicket(
+    SalesReport report, {
+    required String label,
+    StoreSettings store = StoreSettings.defaults,
+  }) async {
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm80, profile);
+    List<int> bytes = [];
+
+    bytes += generator.text(
+      store.storeName,
+      styles: const PosStyles(
+        align: PosAlign.center,
+        height: PosTextSize.size2,
+        width: PosTextSize.size2,
+      ),
+    );
+    bytes += generator.text(
+      'SALES REPORT',
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.text(
+      label,
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.hr();
+
+    void row(String left, String right, {bool bold = false}) {
+      bytes += generator.row([
+        PosColumn(
+          text: left,
+          width: 7,
+          styles: PosStyles(bold: bold),
+        ),
+        PosColumn(
+          text: right,
+          width: 5,
+          styles: PosStyles(align: PosAlign.right, bold: bold),
+        ),
+      ]);
+    }
+
+    row('Orders', '${report.orderCount}');
+    row('Net sales', report.netSales.toStringAsFixed(2));
+    row('GST', report.totalGst.toStringAsFixed(2));
+    row('Gross sales', report.grossSales.toStringAsFixed(2), bold: true);
+    row('Average order', report.averageOrderValue.toStringAsFixed(2));
+    if (report.cancelledCount > 0) {
+      row(
+        'Cancelled (${report.cancelledCount})',
+        report.cancelledValue.toStringAsFixed(2),
+      );
+    }
+
+    if (report.byPaymentMethod.isNotEmpty) {
+      bytes += generator.hr();
+      bytes += generator.text('Payments', styles: const PosStyles(bold: true));
+      for (final payment in report.byPaymentMethod) {
+        row(
+          '${payment.method.name.toUpperCase()} (${payment.orderCount})',
+          payment.total.toStringAsFixed(2),
+        );
+      }
+    }
+
+    if (report.byGstRate.isNotEmpty) {
+      bytes += generator.hr();
+      bytes += generator.text(
+        'GST summary',
+        styles: const PosStyles(bold: true),
+      );
+      for (final gst in report.byGstRate) {
+        row(
+          'GST ${gst.rate.toStringAsFixed(0)}% on ${gst.taxableValue.toStringAsFixed(2)}',
+          gst.gstAmount.toStringAsFixed(2),
+        );
+      }
+    }
+
+    bytes += generator.hr();
+    bytes += generator.text(
+      'Printed ${DateTime.now().toString().substring(0, 16)}',
+      styles: const PosStyles(align: PosAlign.center),
+    );
     bytes += generator.feed(2);
     bytes += generator.cut();
 
