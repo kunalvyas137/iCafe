@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/printer_provider.dart';
+import 'user_management_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -33,6 +34,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.group),
+                title: const Text('Staff Accounts'),
+                subtitle: const Text('Create staff logins and manage roles'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const UserManagementScreen(),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
             const Text(
               'Bluetooth POS Printers',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),

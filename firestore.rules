@@ -1,8 +1,91 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return hasProfile() && profile().role == 'admin';
+    }
+
+    // Any user with a provisioned profile (admin or staff).
+    function isStaff() {
+      return hasProfile() && profile().role in ['admin', 'staff'];
+    }
+
+    function onlyChanges(allowedKeys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys);
+    }
+
+    function validUserPayload() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['email', 'name', 'role', 'createdAt', 'createdBy', 'disabled'])
+        && data.email is string
+        && data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 100
+        && data.role in ['admin', 'staff'];
+    }
+
+    // Profiles are provisioned by an admin only. The very first admin must be
+    // created out of band (Firebase console or Admin SDK) - see README.
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() && validUserPayload();
+      allow update: if isAdmin() && validUserPayload();
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+
+    // Staff may only move stock; catalogue edits are admin-only.
+    match /products/{productId} {
+      allow read: if isStaff();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isStaff() && onlyChanges(['currentStock']));
+    }
+
+    match /raw_materials/{materialId} {
+      allow read: if isStaff();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isStaff() && onlyChanges(['currentStock']));
+    }
+
+    match /recipes/{recipeId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    // Orders are append-only for staff; voiding an order is an admin action.
+    match /orders/{orderId} {
+      allow read, create: if isStaff();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Sequence documents backing the daily order number.
+    match /counters/{counterId} {
+      allow read, write: if isStaff();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
