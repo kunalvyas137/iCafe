@@ -46,19 +46,13 @@ void main() {
     final cart = CartProvider();
     cart.addProduct(_product(currentStock: 1));
 
-    expect(
-      cart.addProduct(_product(currentStock: 1)),
-      contains('out of stock'),
-    );
+    expect(cart.addProduct(_product(currentStock: 1)), contains('out of stock'));
     expect(cart.quantityOf('p1'), 1);
   });
 
   test('unavailable products are rejected', () {
     final cart = CartProvider();
-    expect(
-      cart.addProduct(_product(isAvailable: false)),
-      contains('unavailable'),
-    );
+    expect(cart.addProduct(_product(isAvailable: false)), contains('unavailable'));
     expect(cart.isEmpty, isTrue);
   });
 

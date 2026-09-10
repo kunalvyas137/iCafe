@@ -51,7 +51,10 @@ class _InventoryScreenState extends State<InventoryScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_buildProductsTab(), _buildRawMaterialsTab()],
+        children: [
+          _buildProductsTab(),
+          _buildRawMaterialsTab(),
+        ],
       ),
       floatingActionButton: ListenableBuilder(
         listenable: _tabController,
@@ -121,14 +124,10 @@ class _InventoryScreenState extends State<InventoryScreen>
                   initialValue: type,
                   decoration: const InputDecoration(labelText: 'Type'),
                   items: ProductType.values
-                      .map(
-                        (t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(
-                            t == ProductType.mrp ? 'MRP' : 'In-house',
-                          ),
-                        ),
-                      )
+                      .map((t) => DropdownMenuItem(
+                            value: t,
+                            child: Text(t == ProductType.mrp ? 'MRP' : 'In-house'),
+                          ))
                       .toList(),
                   onChanged: (value) => type = value ?? ProductType.mrp,
                 ),
@@ -140,27 +139,22 @@ class _InventoryScreenState extends State<InventoryScreen>
                     if (double.tryParse(value) == null) return 'Invalid number';
                     return null;
                   },
-                  onSaved: (value) =>
-                      price = double.tryParse(value ?? '0') ?? 0.0,
+                  onSaved: (value) => price = double.tryParse(value ?? '0') ?? 0.0,
                 ),
                 TextFormField(
                   decoration: const InputDecoration(labelText: 'GST Rate (%)'),
                   keyboardType: TextInputType.number,
                   initialValue: '0',
-                  onSaved: (value) =>
-                      gstRate = double.tryParse(value ?? '0') ?? 0.0,
+                  onSaved: (value) => gstRate = double.tryParse(value ?? '0') ?? 0.0,
                 ),
                 TextFormField(
                   decoration: const InputDecoration(labelText: 'Current Stock'),
                   keyboardType: TextInputType.number,
                   initialValue: '0',
-                  onSaved: (value) =>
-                      currentStock = double.tryParse(value ?? '0') ?? 0.0,
+                  onSaved: (value) => currentStock = double.tryParse(value ?? '0') ?? 0.0,
                 ),
                 TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'SKU (optional)',
-                  ),
+                  decoration: const InputDecoration(labelText: 'SKU (optional)'),
                   onSaved: (value) => sku = value?.trim() ?? '',
                 ),
               ],
@@ -225,9 +219,7 @@ class _InventoryScreenState extends State<InventoryScreen>
                   onSaved: (value) => name = value?.trim() ?? '',
                 ),
                 TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Unit (kg, liters, pieces...)',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Unit (kg, liters, pieces...)'),
                   initialValue: 'kg',
                   validator: (value) =>
                       value == null || value.isEmpty ? 'Required' : null,
@@ -275,9 +267,7 @@ class _InventoryScreenState extends State<InventoryScreen>
     );
 
     if (shouldSave == true) {
-      final docRef = FirebaseFirestore.instance
-          .collection('raw_materials')
-          .doc();
+      final docRef = FirebaseFirestore.instance.collection('raw_materials').doc();
       final material = RawMaterial(
         id: docRef.id,
         name: name,
@@ -301,9 +291,7 @@ class _InventoryScreenState extends State<InventoryScreen>
           return const Center(child: Text('Error loading products'));
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(
-            child: Text('No products available. Tap + Add Product.'),
-          );
+          return const Center(child: Text('No products available. Tap + Add Product.'));
         }
 
         final products = snapshot.data!.docs;
@@ -323,8 +311,7 @@ class _InventoryScreenState extends State<InventoryScreen>
                 leading: const Icon(Icons.fastfood),
                 title: Text(product.name),
                 subtitle: Text(
-                  '${product.type == ProductType.inHouse ? "In-house" : "MRP"} • ₹${product.price} • Stock: ${product.currentStock}',
-                ),
+                    '${product.type == ProductType.inHouse ? "In-house" : "MRP"} • ₹${product.price} • Stock: ${product.currentStock}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.edit),
                   onPressed: () {
@@ -341,9 +328,7 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   Widget _buildRawMaterialsTab() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('raw_materials')
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('raw_materials').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -353,8 +338,7 @@ class _InventoryScreenState extends State<InventoryScreen>
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const Center(
-            child: Text('No raw materials. Tap + Add Material.'),
-          );
+              child: Text('No raw materials. Tap + Add Material.'));
         }
 
         final materials = snapshot.data!.docs;
@@ -373,9 +357,8 @@ class _InventoryScreenState extends State<InventoryScreen>
               child: ListTile(
                 leading: const Icon(Icons.science),
                 title: Text(material.name),
-                subtitle: Text(
-                  'Stock: ${material.currentStock} ${material.unit}',
-                ),
+                subtitle:
+                    Text('Stock: ${material.currentStock} ${material.unit}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.add_circle_outline),
                   onPressed: () {

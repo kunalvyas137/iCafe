@@ -59,8 +59,7 @@ class UserService {
     final trimmedName = name.trim();
     final trimmedEmail = email.trim();
 
-    final validationError =
-        validateName(trimmedName) ??
+    final validationError = validateName(trimmedName) ??
         validateEmail(trimmedEmail) ??
         validatePassword(password);
     if (validationError != null) {
@@ -91,9 +90,7 @@ class UserService {
 
       final createdUser = credential.user;
       if (createdUser == null) {
-        throw UserServiceException(
-          'Account creation failed. Please try again.',
-        );
+        throw UserServiceException('Account creation failed. Please try again.');
       }
 
       try {
@@ -101,12 +98,12 @@ class UserService {
             .collection('users')
             .doc(createdUser.uid)
             .set({
-              'email': trimmedEmail,
-              'name': trimmedName,
-              'role': role.name,
-              'createdAt': FieldValue.serverTimestamp(),
-              'createdBy': adminUid,
-            });
+          'email': trimmedEmail,
+          'name': trimmedName,
+          'role': role.name,
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdBy': adminUid,
+        });
       } catch (e) {
         // Roll back the orphaned auth account so the email can be reused.
         try {

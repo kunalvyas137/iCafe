@@ -62,12 +62,10 @@ class UserManagementScreen extends StatelessWidget {
                               value: user.role,
                               underline: const SizedBox.shrink(),
                               items: UserRole.values
-                                  .map(
-                                    (role) => DropdownMenuItem(
-                                      value: role,
-                                      child: Text(role.name),
-                                    ),
-                                  )
+                                  .map((role) => DropdownMenuItem(
+                                        value: role,
+                                        child: Text(role.name),
+                                      ))
                                   .toList(),
                               onChanged: (role) async {
                                 if (role == null || role == user.role) return;
@@ -195,12 +193,10 @@ class UserManagementScreen extends StatelessWidget {
                       initialValue: role,
                       decoration: const InputDecoration(labelText: 'Role'),
                       items: UserRole.values
-                          .map(
-                            (value) => DropdownMenuItem(
-                              value: value,
-                              child: Text(value.name),
-                            ),
-                          )
+                          .map((value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value.name),
+                              ))
                           .toList(),
                       onChanged: (value) => role = value ?? UserRole.staff,
                     ),
@@ -210,9 +206,8 @@ class UserManagementScreen extends StatelessWidget {
             ),
             actions: [
               TextButton(
-                onPressed: isSaving
-                    ? null
-                    : () => Navigator.of(context).pop(false),
+                onPressed:
+                    isSaving ? null : () => Navigator.of(context).pop(false),
                 child: const Text('Cancel'),
               ),
               FilledButton(
@@ -262,9 +257,9 @@ class UserManagementScreen extends StatelessWidget {
     passwordController.dispose();
 
     if (created == true && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('User created')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User created')),
+      );
     }
   }
 

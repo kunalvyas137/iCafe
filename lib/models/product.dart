@@ -1,4 +1,7 @@
-enum ProductType { mrp, inHouse }
+enum ProductType {
+  mrp,
+  inHouse,
+}
 
 class Product {
   final String id;

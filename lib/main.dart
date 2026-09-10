@@ -58,7 +58,9 @@ class ICafeApp extends StatelessWidget {
           useMaterial3: true,
           colorSchemeSeed: Colors.amber,
           textTheme: GoogleFonts.latoTextTheme(),
-          appBarTheme: const AppBarTheme(centerTitle: false),
+          appBarTheme: const AppBarTheme(
+            centerTitle: false,
+          ),
         ),
         home: const AuthGate(),
       ),

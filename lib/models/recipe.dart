@@ -2,10 +2,16 @@ class RecipeIngredient {
   final String rawMaterialId;
   final double quantity;
 
-  RecipeIngredient({required this.rawMaterialId, required this.quantity});
+  RecipeIngredient({
+    required this.rawMaterialId,
+    required this.quantity,
+  });
 
   Map<String, dynamic> toMap() {
-    return {'rawMaterialId': rawMaterialId, 'quantity': quantity};
+    return {
+      'rawMaterialId': rawMaterialId,
+      'quantity': quantity,
+    };
   }
 
   factory RecipeIngredient.fromMap(Map<String, dynamic> map) {
@@ -20,7 +26,10 @@ class Recipe {
   final String productId;
   final List<RecipeIngredient> ingredients;
 
-  Recipe({required this.productId, required this.ingredients});
+  Recipe({
+    required this.productId,
+    required this.ingredients,
+  });
 
   Map<String, dynamic> toMap() {
     return {
