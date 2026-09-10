@@ -26,6 +26,12 @@ class Product {
     this.currentStock = 0,
   });
 
+  /// In-house products are made to order and draw down raw materials through
+  /// their recipe, so only MRP products carry their own stock count.
+  bool get tracksStock => type == ProductType.mrp;
+
+  bool get isSoldOut => !isAvailable || (tracksStock && currentStock <= 0);
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
