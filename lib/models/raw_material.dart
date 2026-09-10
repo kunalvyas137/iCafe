@@ -13,6 +13,10 @@ class RawMaterial {
     required this.reorderLevel,
   });
 
+  bool get isLowStock => currentStock <= reorderLevel;
+
+  bool get isOutOfStock => currentStock <= 0;
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
