@@ -17,7 +17,8 @@ class PrinterProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final List<BluetoothInfo> listResult = await PrintBluetoothThermal.pairedBluetooths;
+      final List<BluetoothInfo> listResult =
+          await PrintBluetoothThermal.pairedBluetooths;
       _availablePrinters = listResult;
     } catch (e) {
       print("Error scanning printers: $e");
@@ -30,7 +31,9 @@ class PrinterProvider with ChangeNotifier {
 
   Future<bool> connectPrinter(String macAddress) async {
     try {
-      final bool result = await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
+      final bool result = await PrintBluetoothThermal.connect(
+        macPrinterAddress: macAddress,
+      );
       if (result) {
         _connectedMac = macAddress;
         _isConnected = true;

@@ -29,10 +29,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (doc.exists) {
         setState(() {
-          _userRole = doc.data()?['role'] == 'admin' ? UserRole.admin : UserRole.staff;
+          _userRole = doc.data()?['role'] == 'admin'
+              ? UserRole.admin
+              : UserRole.staff;
           _isLoading = false;
         });
       } else {
@@ -92,7 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () {
               FirebaseAuth.instance.signOut();
             },
-          )
+          ),
         ],
       ),
       body: Row(
@@ -110,9 +115,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const VerticalDivider(thickness: 1, width: 1),
           // Main Content Area
-          Expanded(
-            child: _buildMainContent(isAdmin),
-          ),
+          Expanded(child: _buildMainContent(isAdmin)),
         ],
       ),
     );

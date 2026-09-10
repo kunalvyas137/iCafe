@@ -20,13 +20,11 @@ For each item, provide the name, quantity, and unit price.
 Format the response strictly as a JSON array of objects with keys: "name", "quantity" (as number), "price" (as number).
 Do not include any other text or markdown block formatting.
 ''');
-    final imageParts = [
-      DataPart('image/jpeg', bytes),
-    ];
+    final imageParts = [DataPart('image/jpeg', bytes)];
 
     try {
       final response = await model.generateContent([
-        Content.multi([prompt, ...imageParts])
+        Content.multi([prompt, ...imageParts]),
       ]);
       print(response.text);
       // TODO: Parse JSON and merge into local database state

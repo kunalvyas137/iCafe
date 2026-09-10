@@ -53,24 +53,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
             return const Center(child: Text('Error loading orders data.'));
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('No orders found to generate analytics.'));
+            return const Center(
+              child: Text('No orders found to generate analytics.'),
+            );
           }
 
           final allOrders = snapshot.data!.docs;
-          
+
           // Filter by date range if selected
-          final filteredOrders = _selectedDateRange == null 
-              ? allOrders 
+          final filteredOrders = _selectedDateRange == null
+              ? allOrders
               : allOrders.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
                   final date = DateTime.parse(data['timestamp']);
                   // Adjust end date to include the entire day
-                  final end = _selectedDateRange!.end.add(const Duration(days: 1));
-                  return date.isAfter(_selectedDateRange!.start) && date.isBefore(end);
+                  final end = _selectedDateRange!.end.add(
+                    const Duration(days: 1),
+                  );
+                  return date.isAfter(_selectedDateRange!.start) &&
+                      date.isBefore(end);
                 }).toList();
 
           if (filteredOrders.isEmpty) {
-            return const Center(child: Text('No orders found for the selected date range.'));
+            return const Center(
+              child: Text('No orders found for the selected date range.'),
+            );
           }
 
           // Aggregate Data
@@ -85,7 +92,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
             totalRevenue += amount;
 
             // Group by weekday (1=Monday, 7=Sunday)
-            dailyRevenue[date.weekday] = (dailyRevenue[date.weekday] ?? 0.0) + amount;
+            dailyRevenue[date.weekday] =
+                (dailyRevenue[date.weekday] ?? 0.0) + amount;
 
             // Group Items
             final itemsList = data['items'] as List<dynamic>? ?? [];
@@ -112,11 +120,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Total Revenue: ₹${totalRevenue.toStringAsFixed(2)}', 
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green)
+                  'Total Revenue: ₹${totalRevenue.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
                 ),
                 const SizedBox(height: 24),
-                const Text('Sales Trend (by Day of Week)', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Sales Trend (by Day of Week)',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   height: 300,
@@ -128,13 +143,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         LineChartData(
                           gridData: const FlGridData(show: true),
                           titlesData: FlTitlesData(
-                            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            rightTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false),
+                            ),
+                            topTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false),
+                            ),
                             bottomTitles: AxisTitles(
                               sideTitles: SideTitles(
                                 showTitles: true,
                                 getTitlesWidget: (value, meta) {
-                                  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                                  const days = [
+                                    'Mon',
+                                    'Tue',
+                                    'Wed',
+                                    'Thu',
+                                    'Fri',
+                                    'Sat',
+                                    'Sun',
+                                  ];
                                   if (value.toInt() >= 0 && value.toInt() < 7) {
                                     return Text(days[value.toInt()]);
                                   }
@@ -150,7 +177,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               isCurved: true,
                               color: Colors.blue,
                               barWidth: 4,
-                              belowBarData: BarAreaData(show: true, color: Colors.blue.withOpacity(0.3)),
+                              belowBarData: BarAreaData(
+                                show: true,
+                                color: Colors.blue.withOpacity(0.3),
+                              ),
                             ),
                           ],
                         ),
@@ -159,7 +189,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ),
                 const SizedBox(height: 32),
-                const Text('Top Selling Items', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Top Selling Items',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 16),
                 Card(
                   elevation: 4,
@@ -172,7 +205,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       return ListTile(
                         leading: const Icon(Icons.star, color: Colors.amber),
                         title: Text(item.key),
-                        trailing: Text('${item.value} sold', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        trailing: Text(
+                          '${item.value} sold',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       );
                     },
                   ),
