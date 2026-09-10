@@ -49,43 +49,19 @@ class _AuthGateState extends State<AuthGate> {
               return const DashboardScreen();
             }
 
-            // No role document; sign out once and show login with an error.
-            // Use a flag so that if the document appears before the callback
-            // runs (e.g. during registration), we keep the user signed in.
+            // No profile document means the account has not been provisioned
+            // by an admin. Sign out once and surface the reason on the login
+            // screen. A short delay lets a profile written moments ago (e.g.
+            // by an admin creating this user) arrive on the stream first.
             if (!_pendingSignOut) {
               _pendingSignOut = true;
               WidgetsBinding.instance.addPostFrameCallback((_) async {
                 if (!_pendingSignOut) return;
-                // Wait briefly to allow a Firestore `set` during registration
-                // to appear on the snapshots stream before taking action.
                 await Future.delayed(const Duration(seconds: 1));
                 if (!_pendingSignOut) return;
                 _pendingSignOut = false;
 
-                final currentUser = FirebaseAuth.instance.currentUser;
-                if (currentUser == null) return;
-
-                // If no user doc exists yet, check whether this is the very
-                // first user. If so, create an admin record so the first
-                // account can always recover from a missing-role state.
-                try {
-                  final usersQuery = await FirebaseFirestore.instance
-                      .collection('users')
-                      .limit(1)
-                      .get();
-                  if (usersQuery.docs.isEmpty) {
-                    await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).set({
-                      'email': currentUser.email,
-                      'role': 'admin',
-                      'createdAt': FieldValue.serverTimestamp(),
-                    });
-                    // The snapshots stream will pick up the new doc and
-                    // AuthGate will rebuild to the dashboard.
-                    return;
-                  }
-                } catch (e) {
-                  debugPrint('Failed to create fallback admin record: $e');
-                }
+                if (FirebaseAuth.instance.currentUser == null) return;
 
                 try {
                   await FirebaseAuth.instance.signOut();
@@ -94,7 +70,8 @@ class _AuthGateState extends State<AuthGate> {
                 }
                 if (mounted) {
                   setState(() {
-                    _authError = 'User account is not configured in database. Contact Admin.';
+                    _authError =
+                        'This account has no iCafe profile. Ask an administrator to grant you access.';
                   });
                 }
               });

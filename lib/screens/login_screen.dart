@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? errorMessage;
@@ -50,61 +49,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() {
           _errorMessage = 'An unexpected error occurred.';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _register() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    UserCredential? userCredential;
-    try {
-      userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'email': userCredential.user!.email,
-        'role': 'admin',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-      // AuthGate will verify the role and route to the dashboard.
-    } on FirebaseAuthException catch (e) {
-      debugPrint('Register FirebaseAuthException: code=${e.code}, message=${e.message}');
-      if (mounted) {
-        final message = e.code == 'keychain-error'
-            ? 'macOS Keychain access is required. Open macos/Runner.xcworkspace in Xcode, enable Keychain Sharing, and sign with a development team.'
-            : '${e.code}: ${e.message ?? 'Registration failed'}';
-        setState(() {
-          _errorMessage = message;
-        });
-      }
-    } catch (e) {
-      debugPrint('Register unexpected error: $e');
-      // If the Firestore write fails after the Auth account was created,
-      // delete the orphaned Auth account so the user can try again.
-      if (userCredential?.user != null) {
-        try {
-          await userCredential!.user!.delete();
-        } catch (_) {
-          // Ignore deletion errors; AuthGate will sign the user out.
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to create user profile. Please try again.';
         });
       }
     } finally {
@@ -217,9 +161,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              TextButton(
-                onPressed: _isLoading ? null : _register,
-                child: const Text('Create Admin Account'),
+              const Text(
+                'Accounts are created by an administrator.',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+                textAlign: TextAlign.center,
               ),
               ],
             ),
