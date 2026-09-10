@@ -106,6 +106,45 @@ void main() {
     expect(restored.cashTendered, isNull);
   });
 
+  test('only completed orders count towards sales totals', () {
+    final completed = _order();
+    expect(completed.countsTowardsSales, isTrue);
+    expect(completed.isCancelled, isFalse);
+
+    final cancelled = CafeOrder.fromMap({
+      ...completed.toMap(),
+      'status': 'cancelled',
+    }, completed.id);
+    expect(cancelled.countsTowardsSales, isFalse);
+    expect(cancelled.isCancelled, isTrue);
+  });
+
+  test('the void audit trail round-trips', () {
+    final base = _order();
+    final cancelled = CafeOrder(
+      id: base.id,
+      timestamp: base.timestamp,
+      items: base.items,
+      subtotal: base.subtotal,
+      totalGst: base.totalGst,
+      grandTotal: base.grandTotal,
+      paymentMethod: base.paymentMethod,
+      status: OrderStatus.cancelled,
+      orderNumber: base.orderNumber,
+      dayKey: base.dayKey,
+      cancelledAt: DateTime(2026, 9, 10, 15),
+      cancelledBy: 'uid-1',
+      cancelReason: 'Wrong item rung up',
+    );
+
+    final restored = CafeOrder.fromMap(cancelled.toMap(), base.id);
+
+    expect(restored.status, OrderStatus.cancelled);
+    expect(restored.cancelledAt, DateTime(2026, 9, 10, 15));
+    expect(restored.cancelledBy, 'uid-1');
+    expect(restored.cancelReason, 'Wrong item rung up');
+  });
+
   test('the counter key buckets orders by local calendar day', () {
     expect(OrderService.dayKeyFor(DateTime(2026, 1, 5, 23, 59)), '20260105');
     expect(OrderService.dayKeyFor(DateTime(2026, 12, 31)), '20261231');
