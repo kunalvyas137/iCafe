@@ -149,4 +149,37 @@ void main() {
     expect(OrderService.dayKeyFor(DateTime(2026, 1, 5, 23, 59)), '20260105');
     expect(OrderService.dayKeyFor(DateTime(2026, 12, 31)), '20261231');
   });
+
+  test('OrderItem modifiers and notes round-trip and support legacy data', () {
+    final itemWithMods = OrderItem(
+      productId: 'latte1',
+      productName: 'Hot Latte',
+      price: 150,
+      quantity: 2,
+      gstRate: 5,
+      modifiers: ['Oat Milk', 'Less Ice', 'Double Shot'],
+      notes: 'Serve warm in mugs',
+    );
+
+    final map = itemWithMods.toMap();
+    expect(map['modifiers'], ['Oat Milk', 'Less Ice', 'Double Shot']);
+    expect(map['notes'], 'Serve warm in mugs');
+
+    final restored = OrderItem.fromMap(map);
+    expect(restored.modifiers, ['Oat Milk', 'Less Ice', 'Double Shot']);
+    expect(restored.notes, 'Serve warm in mugs');
+    expect(restored.totalWithoutGst, 300);
+
+    // Legacy item without modifiers or notes
+    final legacyMap = {
+      'productId': 'tea1',
+      'productName': 'Masala Chai',
+      'price': 40.0,
+      'quantity': 1,
+      'gstRate': 5.0,
+    };
+    final legacyRestored = OrderItem.fromMap(legacyMap);
+    expect(legacyRestored.modifiers, isEmpty);
+    expect(legacyRestored.notes, isNull);
+  });
 }

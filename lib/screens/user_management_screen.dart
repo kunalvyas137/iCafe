@@ -230,12 +230,14 @@ class UserManagementScreen extends StatelessWidget {
                           );
                           if (context.mounted) Navigator.of(context).pop(true);
                         } catch (e) {
-                          setState(() {
-                            isSaving = false;
-                            error = e is UserServiceException
-                                ? e.message
-                                : 'Could not create the user: $e';
-                          });
+                          if (context.mounted) {
+                            setState(() {
+                              isSaving = false;
+                              error = e is UserServiceException
+                                  ? e.message
+                                  : 'Could not create the user: $e';
+                            });
+                          }
                         }
                       },
                 child: isSaving

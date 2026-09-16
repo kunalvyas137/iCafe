@@ -400,9 +400,36 @@ class _OrderDetail extends StatelessWidget {
               dense: true,
               contentPadding: EdgeInsets.zero,
               title: Text(item.productName),
-              subtitle: Text(
-                '${item.quantity} × ₹${item.price.toStringAsFixed(2)} '
-                '· GST ${item.gstRate.toStringAsFixed(0)}%',
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${item.quantity} × ₹${item.price.toStringAsFixed(2)} '
+                    '· GST ${item.gstRate.toStringAsFixed(0)}%',
+                  ),
+                  if (item.modifiers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2.0),
+                      child: Text(
+                        'Modifiers: ${item.modifiers.join(", ")}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  if (item.notes != null && item.notes!.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2.0),
+                      child: Text(
+                        'Note: ${item.notes!}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               trailing: Text('₹${item.totalWithGst.toStringAsFixed(2)}'),
             ),

@@ -13,22 +13,26 @@ class InventoryException implements Exception {
   String toString() => message;
 }
 
-/// A single delivered line: added to [materialId], or booked as a new
-/// material when it is null.
+/// A single delivered line: added to [targetId], or booked as a new
+/// material/product when it is null.
 class StockReceipt {
   const StockReceipt({
     required this.name,
     required this.quantity,
     required this.unit,
-    this.materialId,
+    this.targetId,
     this.reason,
+    this.isMrpProduct = false,
+    this.price = 0.0,
   });
 
   final String name;
   final double quantity;
   final String unit;
-  final String? materialId;
+  final String? targetId;
   final String? reason;
+  final bool isMrpProduct;
+  final double price;
 }
 
 class InventoryService {
@@ -41,26 +45,98 @@ class InventoryService {
   static CollectionReference<Map<String, dynamic>> get _recipes =>
       _db.collection('recipes');
 
-  static Stream<List<Product>> watchProducts() {
+  static bool _migrationChecked = false;
+
+  /// Ensures legacy raw_materials documents are safely mirrored to products collection.
+  static Future<void> ensureMigrated() async {
+    if (_migrationChecked) return;
+    _migrationChecked = true;
+    try {
+      final snap = await _materials.get();
+      if (snap.docs.isEmpty) return;
+
+      final batch = _db.batch();
+      var needCommit = false;
+      for (final doc in snap.docs) {
+        final prodSnap = await _products.doc(doc.id).get();
+        if (!prodSnap.exists) {
+          final data = doc.data();
+          final product = Product(
+            id: doc.id,
+            name: data['name'] ?? '',
+            type: ProductType.rawMaterial,
+            unit: (data['unit'] ?? 'kg').toString(),
+            currentStock: (data['currentStock'] ?? 0.0).toDouble(),
+            reorderLevel: (data['reorderLevel'] ?? 0.0).toDouble(),
+            isSellable: false,
+            isIngredient: true,
+          );
+          batch.set(_products.doc(doc.id), product.toMap());
+          needCommit = true;
+        }
+      }
+      if (needCommit) {
+        await batch.commit();
+      }
+    } catch (_) {
+      // Non-fatal, continue with existing data
+    }
+  }
+
+  /// Streams products. If [sellableOnly] is true, returns only items marked as sellable on POS.
+  static Stream<List<Product>> watchProducts({bool? sellableOnly}) {
     return _products
         .orderBy('name')
         .snapshots()
         .map(
-          (snap) => snap.docs
-              .map((doc) => Product.fromMap(doc.data(), doc.id))
-              .toList(),
+          (snap) {
+            final list = snap.docs
+                .map((doc) => Product.fromMap(doc.data(), doc.id))
+                .toList();
+            if (sellableOnly == true) {
+              return list.where((p) => p.isSellable).toList();
+            }
+            return list;
+          },
         );
   }
 
+  /// Look up a product by its SKU / barcode. Returns null if not found.
+  static Future<Product?> findBySku(String sku) async {
+    if (sku.trim().isEmpty) return null;
+    final q = await _products
+        .where('sku', isEqualTo: sku.trim())
+        .limit(1)
+        .get();
+    if (q.docs.isNotEmpty) {
+      final doc = q.docs.first;
+      return Product.fromMap(doc.data(), doc.id);
+    }
+    // Also check by document ID (some flows use the ID as the SKU)
+    final byId = await _products.doc(sku.trim()).get();
+    if (byId.exists) return Product.fromMap(byId.data()!, byId.id);
+    return null;
+  }
+
+  /// Streams raw materials / ingredients. Reads unified products collection with fallback to raw_materials.
   static Stream<List<RawMaterial>> watchRawMaterials() {
-    return _materials
+    return _products
         .orderBy('name')
         .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map((doc) => RawMaterial.fromMap(doc.data(), doc.id))
-              .toList(),
-        );
+        .map((snap) {
+          final products = snap.docs
+              .map((doc) => Product.fromMap(doc.data(), doc.id))
+              .where((p) => p.isIngredient || p.type == ProductType.rawMaterial)
+              .map((p) => RawMaterial(
+                    id: p.id,
+                    name: p.name,
+                    unit: p.unit,
+                    currentStock: p.currentStock,
+                    reorderLevel: p.reorderLevel,
+                  ))
+              .toList();
+          return products;
+        });
   }
 
   static Future<Recipe?> loadRecipe(String productId) async {
@@ -70,45 +146,117 @@ class InventoryService {
   }
 
   static Future<String> createProduct(Product product) async {
-    final ref = _products.doc();
-    await ref.set(product.toMap()..['id'] = ref.id);
-    return ref.id;
+    final ref = product.id.isEmpty ? _products.doc() : _products.doc(product.id);
+    final id = ref.id;
+    final toSave = product.copyWith(id: id);
+    await ref.set(toSave.toMap()..['id'] = id);
+
+    // If it's an ingredient or raw material, mirror to raw_materials collection for backwards compatibility
+    if (toSave.isIngredient || toSave.type == ProductType.rawMaterial) {
+      await _materials.doc(id).set(
+        RawMaterial(
+          id: id,
+          name: toSave.name,
+          unit: toSave.unit,
+          currentStock: toSave.currentStock,
+          reorderLevel: toSave.reorderLevel,
+        ).toMap(),
+        SetOptions(merge: true),
+      );
+    }
+    return id;
   }
 
-  static Future<void> updateProduct(Product product) {
-    return _products
+  static Future<void> updateProduct(Product product) async {
+    await _products
         .doc(product.id)
         .update(product.toMap()..['id'] = product.id);
+
+    // Mirror updates to raw_materials if it is an ingredient
+    if (product.isIngredient || product.type == ProductType.rawMaterial) {
+      await _materials.doc(product.id).set(
+        RawMaterial(
+          id: product.id,
+          name: product.name,
+          unit: product.unit,
+          currentStock: product.currentStock,
+          reorderLevel: product.reorderLevel,
+        ).toMap(),
+        SetOptions(merge: true),
+      );
+    }
   }
 
   static Future<void> setAvailability(String productId, bool isAvailable) {
     return _products.doc(productId).update({'isAvailable': isAvailable});
   }
 
-  /// Removes a product and the recipe keyed by its id, so a deleted in-house
-  /// item cannot leave an orphan recipe behind.
+  /// Instantly publishes an inventory item to the POS menu with a given selling price and GST rate.
+  static Future<void> publishToPos(
+    String productId, {
+    required double price,
+    required double gstRate,
+  }) async {
+    await _products.doc(productId).update({
+      'type': ProductType.mrp.name,
+      'isSellable': true,
+      'price': price,
+      'gstRate': gstRate,
+      'isAvailable': true,
+    });
+  }
+
+  /// Hides/removes an item from the POS menu while keeping it in inventory.
+  static Future<void> removeFromPos(String productId) async {
+    await _products.doc(productId).update({
+      'isSellable': false,
+      'isAvailable': false,
+    });
+  }
+
+  /// Removes a product and its recipe.
   static Future<void> deleteProduct(String productId) async {
     final batch = _db.batch();
     batch.delete(_products.doc(productId));
+    batch.delete(_materials.doc(productId));
     batch.delete(_recipes.doc(productId));
     await batch.commit();
   }
 
   static Future<String> createRawMaterial(RawMaterial material) async {
-    final ref = _materials.doc();
-    await ref.set(material.toMap()..['id'] = ref.id);
-    return ref.id;
+    final ref = material.id.isEmpty ? _products.doc() : _products.doc(material.id);
+    final id = ref.id;
+    final product = Product(
+      id: id,
+      name: material.name,
+      type: ProductType.rawMaterial,
+      unit: material.unit,
+      currentStock: material.currentStock,
+      reorderLevel: material.reorderLevel,
+      isSellable: false,
+      isIngredient: true,
+    );
+    await ref.set(product.toMap()..['id'] = id);
+    await _materials.doc(id).set(material.toMap()..['id'] = id);
+    return id;
   }
 
-  static Future<void> updateRawMaterial(RawMaterial material) {
-    return _materials
+  static Future<void> updateRawMaterial(RawMaterial material) async {
+    await _products.doc(material.id).set({
+      'name': material.name,
+      'unit': material.unit,
+      'currentStock': material.currentStock,
+      'reorderLevel': material.reorderLevel,
+      'isIngredient': true,
+    }, SetOptions(merge: true));
+
+    await _materials
         .doc(material.id)
-        .update(material.toMap()..['id'] = material.id);
+        .set(material.toMap()..['id'] = material.id, SetOptions(merge: true));
   }
 
-  /// Books a delivery: adds to the stock of each existing material, and
-  /// creates the ones that were left unmatched. Returns how many materials
-  /// were created so the caller can report it.
+  /// Books delivered items directly into unified products inventory.
+  /// Any MRP/resale product is immediately available on POS with its selling price.
   static Future<int> receiveStock(List<StockReceipt> receipts) async {
     if (receipts.isEmpty) {
       throw InventoryException('Nothing to receive.');
@@ -117,66 +265,193 @@ class InventoryService {
     var created = 0;
     for (final receipt in receipts) {
       if (receipt.quantity <= 0) continue;
-      final materialId = receipt.materialId;
-      if (materialId == null) {
-        await createRawMaterial(
-          RawMaterial(
-            id: '',
-            name: receipt.name,
-            unit: receipt.unit,
-            currentStock: receipt.quantity,
-            reorderLevel: 0,
-          ),
+      final targetId = receipt.targetId;
+
+      if (targetId == null) {
+        // Create new item in unified products collection
+        final isSellable = receipt.isMrpProduct;
+        final sellPrice = receipt.price > 0 ? receipt.price * 1.5 : 10.0;
+        final newProduct = Product(
+          id: '',
+          name: receipt.name,
+          type: isSellable ? ProductType.mrp : ProductType.rawMaterial,
+          price: isSellable ? sellPrice : 0.0,
+          costPrice: receipt.price > 0 ? receipt.price : null,
+          gstRate: 0,
+          currentStock: receipt.quantity,
+          reorderLevel: 0,
+          unit: receipt.unit.isEmpty ? 'pcs' : receipt.unit,
+          isAvailable: true,
+          isSellable: isSellable,
+          isIngredient: !isSellable,
         );
+        await createProduct(newProduct);
         created++;
       } else {
-        await adjustRawMaterialStock(
-          materialId,
-          receipt.quantity,
-          reason: receipt.reason,
-        );
+        await _db.runTransaction<void>((transaction) async {
+          final prodRef = _products.doc(targetId);
+          final snap = await transaction.get(prodRef);
+          if (snap.exists) {
+            final data = snap.data()!;
+            final currentStock = (data['currentStock'] as num? ?? 0).toDouble();
+            final updates = <String, dynamic>{
+              'currentStock': currentStock + receipt.quantity,
+              if (receipt.price > 0) 'costPrice': receipt.price,
+            };
+            if (receipt.isMrpProduct) {
+              updates['isSellable'] = true;
+              updates['type'] = ProductType.mrp.name;
+              if ((data['price'] as num? ?? 0) <= 0 && receipt.price > 0) {
+                updates['price'] = receipt.price * 1.5;
+              }
+            }
+            transaction.update(prodRef, updates);
+
+            // Sync legacy raw_materials doc if present
+            final rawRef = _materials.doc(targetId);
+            final rawSnap = await transaction.get(rawRef);
+            if (rawSnap.exists) {
+              final rawStock = (rawSnap.data()?['currentStock'] as num? ?? 0).toDouble();
+              transaction.update(rawRef, {'currentStock': rawStock + receipt.quantity});
+            }
+          } else {
+            // Target was in legacy raw_materials
+            final rawRef = _materials.doc(targetId);
+            final rawSnap = await transaction.get(rawRef);
+            if (!rawSnap.exists) throw InventoryException('Item not found.');
+            final rawData = rawSnap.data()!;
+            final currentStock = (rawData['currentStock'] as num? ?? 0).toDouble();
+            final updatedStock = currentStock + receipt.quantity;
+            transaction.update(rawRef, {'currentStock': updatedStock});
+
+            // Mirror into products
+            final newProd = Product(
+              id: targetId,
+              name: rawData['name'] ?? receipt.name,
+              type: receipt.isMrpProduct ? ProductType.mrp : ProductType.rawMaterial,
+              unit: rawData['unit'] ?? receipt.unit,
+              currentStock: updatedStock,
+              reorderLevel: (rawData['reorderLevel'] ?? 0.0).toDouble(),
+              isSellable: receipt.isMrpProduct,
+              isIngredient: true,
+            );
+            transaction.set(prodRef, newProd.toMap());
+          }
+        });
       }
     }
     return created;
   }
 
-  /// Applies a signed [delta] to stock. Reading inside a transaction keeps a
-  /// manual correction from racing a sale and driving stock negative.
-  static Future<double> adjustRawMaterialStock(
-    String materialId,
+  /// Adjusts stock for any inventory item (product or raw material) by [delta].
+  static Future<double> adjustStock(
+    String itemId,
     double delta, {
     String? reason,
   }) async {
     if (delta == 0) {
       throw InventoryException('Enter an amount to add or remove.');
     }
-    final ref = _materials.doc(materialId);
+    final prodRef = _products.doc(itemId);
+    final rawRef = _materials.doc(itemId);
 
     return _db.runTransaction<double>((transaction) async {
-      final snap = await transaction.get(ref);
-      final data = snap.data();
-      if (data == null) {
-        throw InventoryException('This material no longer exists.');
+      final prodSnap = await transaction.get(prodRef);
+      final rawSnap = await transaction.get(rawRef);
+
+      if (!prodSnap.exists && !rawSnap.exists) {
+        throw InventoryException('This item no longer exists.');
       }
-      final material = RawMaterial.fromMap(data, snap.id);
-      final updated = material.currentStock + delta;
+
+      final data = prodSnap.data() ?? rawSnap.data()!;
+      final currentStock = (data['currentStock'] as num? ?? 0).toDouble();
+      final unit = (data['unit'] ?? 'pcs').toString();
+      final updated = currentStock + delta;
+
       if (updated < 0) {
         throw InventoryException(
-          'Only ${material.currentStock.toStringAsFixed(2)} ${material.unit} in stock.',
+          'Only ${currentStock.toStringAsFixed(2)} $unit in stock.',
         );
       }
-      transaction.update(ref, {
-        'currentStock': updated,
-        'lastAdjustedAt': FieldValue.serverTimestamp(),
-        if (reason != null && reason.trim().isNotEmpty)
-          'lastAdjustmentReason': reason.trim(),
-      });
+
+      if (prodSnap.exists) {
+        transaction.update(prodRef, {
+          'currentStock': updated,
+          'lastAdjustedAt': FieldValue.serverTimestamp(),
+          if (reason != null && reason.trim().isNotEmpty)
+            'lastAdjustmentReason': reason.trim(),
+        });
+      }
+
+      if (rawSnap.exists) {
+        transaction.update(rawRef, {
+          'currentStock': updated,
+          'lastAdjustedAt': FieldValue.serverTimestamp(),
+          if (reason != null && reason.trim().isNotEmpty)
+            'lastAdjustmentReason': reason.trim(),
+        });
+      }
+
       return updated;
     });
   }
 
-  /// Refuses to delete a material that a recipe still consumes, which would
-  /// otherwise make those products silently un-sellable at checkout.
+  /// Backwards-compatible alias for adjustStock.
+  static Future<double> adjustRawMaterialStock(
+    String materialId,
+    double delta, {
+    String? reason,
+  }) {
+    return adjustStock(materialId, delta, reason: reason);
+  }
+
+  /// Transfers [quantity] from a raw material to an MRP product's stock.
+  static Future<void> transferStock(
+    String rawMaterialId,
+    String productId,
+    double quantity, {
+    String? reason,
+  }) async {
+    if (quantity <= 0) {
+      throw InventoryException('Quantity to transfer must be positive.');
+    }
+    final sourceRef = _products.doc(rawMaterialId);
+    final destRef = _products.doc(productId);
+
+    return _db.runTransaction<void>((transaction) async {
+      final sourceSnap = await transaction.get(sourceRef);
+      final destSnap = await transaction.get(destRef);
+
+      if (!sourceSnap.exists || !destSnap.exists) {
+        throw InventoryException('One of the items no longer exists.');
+      }
+
+      final sourceData = sourceSnap.data()!;
+      final destData = destSnap.data()!;
+
+      final sourceStock = (sourceData['currentStock'] as num? ?? 0).toDouble();
+      final destStock = (destData['currentStock'] as num? ?? 0).toDouble();
+      final unit = (sourceData['unit'] ?? 'pcs').toString();
+
+      final updatedSource = sourceStock - quantity;
+      if (updatedSource < 0) {
+        throw InventoryException(
+          'Cannot transfer $quantity. Only ${sourceStock.toStringAsFixed(2)} $unit in stock.',
+        );
+      }
+
+      transaction.update(sourceRef, {
+        'currentStock': updatedSource,
+        'lastAdjustedAt': FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(destRef, {
+        'currentStock': destStock + quantity,
+      });
+    });
+  }
+
+  /// Deletes a raw material if not used in any recipes.
   static Future<void> deleteRawMaterial(String materialId) async {
     final users = await _recipeNamesUsing(materialId);
     if (users.isNotEmpty) {
@@ -184,7 +459,10 @@ class InventoryService {
         'Still used by ${users.length} recipe(s). Remove it from them first.',
       );
     }
-    await _materials.doc(materialId).delete();
+    final batch = _db.batch();
+    batch.delete(_products.doc(materialId));
+    batch.delete(_materials.doc(materialId));
+    await batch.commit();
   }
 
   static Future<List<String>> _recipeNamesUsing(String materialId) async {

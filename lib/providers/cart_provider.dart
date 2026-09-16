@@ -25,13 +25,19 @@ class CartProvider with ChangeNotifier {
   double get grandTotal => subtotal + totalGst;
 
   int quantityOf(String productId) {
-    final index = _items.indexWhere((item) => item.productId == productId);
-    return index < 0 ? 0 : _items[index].quantity;
+    return _items
+        .where((item) => item.productId == productId)
+        .fold(0, (sum, item) => sum + item.quantity);
   }
 
   /// Adds [quantity] of [product], capped at the available stock for products
   /// that track it. Returns an error message when nothing could be added.
-  String? addProduct(Product product, {int quantity = 1}) {
+  String? addProduct(
+    Product product, {
+    int quantity = 1,
+    List<String>? modifiers,
+    String? notes,
+  }) {
     if (!product.isAvailable) {
       return '${product.name} is marked unavailable.';
     }
@@ -45,12 +51,18 @@ class CartProvider with ChangeNotifier {
       return 'Only $remaining of ${product.name} left in stock.';
     }
 
+    final mods = modifiers ?? const <String>[];
+    final trimmedNotes = notes?.trim();
+
     final existingIndex = _items.indexWhere(
-      (item) => item.productId == product.id,
+      (item) =>
+          item.productId == product.id &&
+          listEquals(item.modifiers, mods) &&
+          (item.notes ?? '') == (trimmedNotes ?? ''),
     );
     if (existingIndex >= 0) {
       _items[existingIndex] = _items[existingIndex].copyWith(
-        quantity: inCart + quantity,
+        quantity: _items[existingIndex].quantity + quantity,
       );
     } else {
       _items.add(
@@ -60,6 +72,8 @@ class CartProvider with ChangeNotifier {
           price: product.price,
           quantity: quantity,
           gstRate: product.gstRate,
+          modifiers: mods,
+          notes: trimmedNotes,
         ),
       );
     }
@@ -70,6 +84,11 @@ class CartProvider with ChangeNotifier {
   void incrementQuantity(String productId) {
     final index = _items.indexWhere((item) => item.productId == productId);
     if (index < 0) return;
+    incrementQuantityAt(index);
+  }
+
+  void incrementQuantityAt(int index) {
+    if (index < 0 || index >= _items.length) return;
     _items[index] = _items[index].copyWith(
       quantity: _items[index].quantity + 1,
     );
@@ -80,6 +99,11 @@ class CartProvider with ChangeNotifier {
   void decrementQuantity(String productId) {
     final index = _items.indexWhere((item) => item.productId == productId);
     if (index < 0) return;
+    decrementQuantityAt(index);
+  }
+
+  void decrementQuantityAt(int index) {
+    if (index < 0 || index >= _items.length) return;
     final quantity = _items[index].quantity - 1;
     if (quantity <= 0) {
       _items.removeAt(index);
@@ -92,9 +116,27 @@ class CartProvider with ChangeNotifier {
   RemovedCartItem? removeProduct(String productId) {
     final index = _items.indexWhere((item) => item.productId == productId);
     if (index < 0) return null;
+    return removeItemAt(index);
+  }
+
+  RemovedCartItem? removeItemAt(int index) {
+    if (index < 0 || index >= _items.length) return null;
     final removed = RemovedCartItem(index, _items.removeAt(index));
     notifyListeners();
     return removed;
+  }
+
+  void updateItemModifiers({
+    required int index,
+    List<String>? modifiers,
+    String? notes,
+  }) {
+    if (index < 0 || index >= _items.length) return;
+    _items[index] = _items[index].copyWith(
+      modifiers: modifiers ?? _items[index].modifiers,
+      notes: notes,
+    );
+    notifyListeners();
   }
 
   void restoreItem(RemovedCartItem removed) {

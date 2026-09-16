@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/order.dart';
 import '../models/product.dart';
-import '../models/raw_material.dart';
 import '../models/recipe.dart';
 
 /// A checkout that was refused before anything was written.
@@ -86,10 +85,21 @@ class OrderService {
       }
 
       final materialSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      final materialInProducts = <String, bool>{};
       for (final materialId in materialUsage.keys) {
-        materialSnaps[materialId] = await transaction.get(
-          _db.collection('raw_materials').doc(materialId),
+        var snap = await transaction.get(
+          _db.collection('products').doc(materialId),
         );
+        if (snap.exists && snap.data() != null) {
+          materialSnaps[materialId] = snap;
+          materialInProducts[materialId] = true;
+        } else {
+          snap = await transaction.get(
+            _db.collection('raw_materials').doc(materialId),
+          );
+          materialSnaps[materialId] = snap;
+          materialInProducts[materialId] = false;
+        }
       }
 
       // Validation, still before any write.
@@ -119,10 +129,12 @@ class OrderService {
           problems.add('A recipe ingredient ($materialId) is missing.');
           return;
         }
-        final material = RawMaterial.fromMap(data, snap.id);
-        if (material.currentStock < required) {
+        final currentStock = (data['currentStock'] as num? ?? 0).toDouble();
+        final name = data['name'] ?? 'Ingredient';
+        final unit = (data['unit'] ?? 'pcs').toString();
+        if (currentStock < required) {
           problems.add(
-            '${material.name}: needs ${required.toStringAsFixed(2)} ${material.unit}, ${material.currentStock.toStringAsFixed(2)} in stock.',
+            '$name: needs ${required.toStringAsFixed(2)} $unit, ${currentStock.toStringAsFixed(2)} in stock.',
           );
         }
       });
@@ -150,7 +162,7 @@ class OrderService {
         totalGst: totalGst,
         grandTotal: subtotal + totalGst,
         paymentMethod: paymentMethod,
-        status: OrderStatus.completed,
+        status: OrderStatus.pending,
         orderNumber: orderNumber,
         dayKey: dayKey,
         cashTendered: paymentMethod == PaymentMethod.cash ? cashTendered : null,
@@ -178,9 +190,15 @@ class OrderService {
       }
 
       materialUsage.forEach((materialId, required) {
-        transaction.update(_db.collection('raw_materials').doc(materialId), {
-          'currentStock': FieldValue.increment(-required),
-        });
+        if (materialInProducts[materialId] == true) {
+          transaction.update(_db.collection('products').doc(materialId), {
+            'currentStock': FieldValue.increment(-required),
+          });
+        } else {
+          transaction.update(_db.collection('raw_materials').doc(materialId), {
+            'currentStock': FieldValue.increment(-required),
+          });
+        }
       });
 
       return order;
@@ -202,6 +220,50 @@ class OrderService {
               .map((doc) => CafeOrder.fromMap(doc.data(), doc.id))
               .toList(),
         );
+  }
+
+  /// Live stream of all [pending] and [preparing] orders across any day,
+  /// sorted oldest-first so the longest-waiting order is at the top.
+  static Stream<List<CafeOrder>> watchActiveOrders() {
+    return _db
+        .collection('orders')
+        .where('status', whereIn: [
+          OrderStatus.pending.name,
+          OrderStatus.preparing.name,
+        ])
+        .snapshots()
+        .map(
+          (snap) {
+            final orders = snap.docs
+                .map((doc) => CafeOrder.fromMap(doc.data(), doc.id))
+                .toList();
+            orders.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            return orders;
+          },
+        );
+  }
+
+  /// Alerts the chef: transitions order from [pending] → [preparing].
+  static Future<void> alertChef(CafeOrder order) async {
+    if (!order.isPending) {
+      throw CheckoutException('Order ${order.displayNumber} is not pending.');
+    }
+    await _db.collection('orders').doc(order.id).update({
+      'status': OrderStatus.preparing.name,
+      'alertedChefAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Closes a prepared order as delivered: transitions [preparing] → [completed].
+  /// This is the point at which the order starts counting toward revenue.
+  static Future<void> closeOrder(CafeOrder order) async {
+    if (!order.isPreparing) {
+      throw CheckoutException(
+          'Order ${order.displayNumber} is not in the preparing state.');
+    }
+    await _db.collection('orders').doc(order.id).update({
+      'status': OrderStatus.completed.name,
+    });
   }
 
   /// Voids an order and puts the stock it consumed back, in one transaction so
@@ -262,6 +324,24 @@ class OrderService {
         }
       }
 
+      final materialReturnSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      final materialInProducts = <String, bool>{};
+      for (final materialId in materialReturns.keys) {
+        var snap = await transaction.get(
+          _db.collection('products').doc(materialId),
+        );
+        if (snap.exists && snap.data() != null) {
+          materialReturnSnaps[materialId] = snap;
+          materialInProducts[materialId] = true;
+        } else {
+          snap = await transaction.get(
+            _db.collection('raw_materials').doc(materialId),
+          );
+          materialReturnSnaps[materialId] = snap;
+          materialInProducts[materialId] = false;
+        }
+      }
+
       final cancelled = CafeOrder(
         id: current.id,
         timestamp: current.timestamp,
@@ -300,9 +380,15 @@ class OrderService {
       }
 
       materialReturns.forEach((materialId, quantity) {
-        transaction.update(_db.collection('raw_materials').doc(materialId), {
-          'currentStock': FieldValue.increment(quantity),
-        });
+        if (materialInProducts[materialId] == true) {
+          transaction.update(_db.collection('products').doc(materialId), {
+            'currentStock': FieldValue.increment(quantity),
+          });
+        } else {
+          transaction.update(_db.collection('raw_materials').doc(materialId), {
+            'currentStock': FieldValue.increment(quantity),
+          });
+        }
       });
 
       return cancelled;

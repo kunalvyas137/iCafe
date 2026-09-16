@@ -74,4 +74,102 @@ void main() {
     expect(material(5.1).isLowStock, isFalse);
     expect(material(0).isOutOfStock, isTrue);
   });
+
+  test('unified product model defaults and round-trips correctly', () {
+    // 1. Raw material defaults
+    final ingredient = Product(
+      id: 'm1',
+      name: 'Sugar',
+      type: ProductType.rawMaterial,
+      unit: 'kg',
+      currentStock: 10,
+    );
+    expect(ingredient.isSellable, isFalse);
+    expect(ingredient.isIngredient, isTrue);
+    expect(ingredient.tracksStock, isTrue);
+
+    // 2. Direct MRP resale defaults
+    final drink = Product(
+      id: 'p2',
+      name: 'Red Bull',
+      type: ProductType.mrp,
+      unit: 'can',
+      price: 125,
+      currentStock: 24,
+      costPrice: 85,
+    );
+    expect(drink.isSellable, isTrue);
+    expect(drink.isIngredient, isFalse);
+    expect(drink.tracksStock, isTrue);
+    expect(drink.costPrice, 85);
+
+    // 3. Round-trip serialization
+    final map = drink.toMap();
+    final restored = Product.fromMap(map, 'p2');
+    expect(restored.name, 'Red Bull');
+    expect(restored.unit, 'can');
+    expect(restored.costPrice, 85);
+    expect(restored.isSellable, isTrue);
+    expect(restored.isIngredient, isFalse);
+
+    // 4. Backward compatibility from legacy map without new fields
+    final legacyMap = {
+      'name': 'Espresso Beans',
+      'type': 'rawMaterial',
+      'currentStock': 5.0,
+      'unit': 'kg',
+    };
+    final legacyProduct = Product.fromMap(legacyMap, 'rm1');
+    expect(legacyProduct.isSellable, isFalse);
+    expect(legacyProduct.isIngredient, isTrue);
+    expect(legacyProduct.tracksStock, isTrue);
+  });
+
+  test('product category round-trips and fallback heuristic classifies items', () {
+    final custom = Product(
+      id: 'c1',
+      name: 'Special Combo',
+      type: ProductType.inHouse,
+      price: 250,
+      category: 'Combos & Meals',
+    );
+    expect(custom.category, 'Combos & Meals');
+    expect(custom.displayCategory, 'Combos & Meals');
+
+    final map = custom.toMap();
+    expect(map['category'], 'Combos & Meals');
+    final restored = Product.fromMap(map, 'c1');
+    expect(restored.category, 'Combos & Meals');
+    expect(restored.displayCategory, 'Combos & Meals');
+
+    // Test heuristic classification for backwards compatibility
+    expect(
+      Product(id: '1', name: 'Cold Coffee', type: ProductType.inHouse).displayCategory,
+      'Coffee & Tea',
+    );
+    expect(
+      Product(id: '2', name: 'Masala Chai', type: ProductType.inHouse).displayCategory,
+      'Coffee & Tea',
+    );
+    expect(
+      Product(id: '3', name: 'Coca Cola Can', type: ProductType.mrp).displayCategory,
+      'Beverages',
+    );
+    expect(
+      Product(id: '4', name: 'Haldiram Bhel', type: ProductType.mrp).displayCategory,
+      'Snacks & Food',
+    );
+    expect(
+      Product(id: '5', name: 'Chocolate Brownie', type: ProductType.inHouse).displayCategory,
+      'Bakery & Desserts',
+    );
+    expect(
+      Product(id: '6', name: 'Fresh Guava Plate', type: ProductType.inHouse).displayCategory,
+      'Fresh Fruits',
+    );
+    expect(
+      Product(id: '7', name: 'Notebook', type: ProductType.mrp).displayCategory,
+      'General',
+    );
+  });
 }

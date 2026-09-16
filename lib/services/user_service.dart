@@ -71,10 +71,20 @@ class UserService {
       throw UserServiceException('You must be signed in to create users.');
     }
 
-    final secondaryApp = await Firebase.initializeApp(
-      name: 'userProvisioning',
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    // Reuse an existing secondary app if a previous call left one behind
+    // (e.g. hot-restart while a creation was in-flight). This prevents the
+    // "app already exists" exception that causes the _dependents.isEmpty crash.
+    const _secondaryAppName = 'userProvisioning';
+    FirebaseApp secondaryApp;
+    try {
+      secondaryApp = Firebase.app(_secondaryAppName);
+    } catch (_) {
+      // App does not exist yet — create it normally.
+      secondaryApp = await Firebase.initializeApp(
+        name: _secondaryAppName,
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
 
     try {
       final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
@@ -114,7 +124,10 @@ class UserService {
         await secondaryAuth.signOut();
       }
     } finally {
-      await secondaryApp.delete();
+      // Always clean up the secondary app so the next call can create it fresh.
+      try {
+        await secondaryApp.delete();
+      } catch (_) {}
     }
   }
 

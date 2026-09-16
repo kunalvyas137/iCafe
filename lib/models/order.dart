@@ -1,6 +1,7 @@
 enum PaymentMethod { cash, upi, card, sodexo, other }
 
-enum OrderStatus { pending, completed, cancelled }
+/// Lifecycle: pending → preparing → completed (or cancelled at any point by admin).
+enum OrderStatus { pending, preparing, completed, cancelled }
 
 class OrderItem {
   final String productId;
@@ -8,6 +9,8 @@ class OrderItem {
   final double price;
   final int quantity;
   final double gstRate;
+  final List<String> modifiers;
+  final String? notes;
 
   double get totalWithoutGst => price * quantity;
   double get gstAmount => totalWithoutGst * (gstRate / 100);
@@ -19,15 +22,23 @@ class OrderItem {
     required this.price,
     required this.quantity,
     required this.gstRate,
+    this.modifiers = const [],
+    this.notes,
   });
 
-  OrderItem copyWith({int? quantity}) {
+  OrderItem copyWith({
+    int? quantity,
+    List<String>? modifiers,
+    String? notes,
+  }) {
     return OrderItem(
       productId: productId,
       productName: productName,
       price: price,
       quantity: quantity ?? this.quantity,
       gstRate: gstRate,
+      modifiers: modifiers ?? this.modifiers,
+      notes: notes ?? this.notes,
     );
   }
 
@@ -38,6 +49,8 @@ class OrderItem {
       'price': price,
       'quantity': quantity,
       'gstRate': gstRate,
+      if (modifiers.isNotEmpty) 'modifiers': modifiers,
+      if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
     };
   }
 
@@ -48,6 +61,11 @@ class OrderItem {
       price: (map['price'] ?? 0.0).toDouble(),
       quantity: map['quantity']?.toInt() ?? 0,
       gstRate: (map['gstRate'] ?? 0.0).toDouble(),
+      modifiers: (map['modifiers'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      notes: map['notes'] as String?,
     );
   }
 }
@@ -74,6 +92,9 @@ class CafeOrder {
   final String? customerName;
   final String? cashierId;
 
+  /// Set when a cashier taps "Alert Chef" — transitions status to [OrderStatus.preparing].
+  final DateTime? alertedChefAt;
+
   final DateTime? cancelledAt;
   final String? cancelledBy;
   final String? cancelReason;
@@ -94,6 +115,7 @@ class CafeOrder {
     this.tableLabel,
     this.customerName,
     this.cashierId,
+    this.alertedChefAt,
     this.cancelledAt,
     this.cancelledBy,
     this.cancelReason,
@@ -104,9 +126,14 @@ class CafeOrder {
       orderNumber > 0 ? '#${orderNumber.toString().padLeft(3, '0')}' : '#$id';
 
   bool get isCancelled => status == OrderStatus.cancelled;
+  bool get isPending => status == OrderStatus.pending;
+  bool get isPreparing => status == OrderStatus.preparing;
 
-  /// Cancelled orders are excluded from every revenue figure.
+  /// Only fully-delivered (completed) orders count toward revenue.
   bool get countsTowardsSales => status == OrderStatus.completed;
+
+  /// True while the order is still in the active queue (not yet delivered or cancelled).
+  bool get isActive => isPending || isPreparing;
 
   double? get changeDue {
     final tendered = cashTendered;
@@ -145,6 +172,7 @@ class CafeOrder {
       if (tableLabel != null) 'tableLabel': tableLabel,
       if (customerName != null) 'customerName': customerName,
       if (cashierId != null) 'cashierId': cashierId,
+      if (alertedChefAt != null) 'alertedChefAt': alertedChefAt!.toIso8601String(),
       if (cancelledAt != null) 'cancelledAt': cancelledAt!.toIso8601String(),
       if (cancelledBy != null) 'cancelledBy': cancelledBy,
       if (cancelReason != null) 'cancelReason': cancelReason,
@@ -176,6 +204,9 @@ class CafeOrder {
       tableLabel: map['tableLabel'] as String?,
       customerName: map['customerName'] as String?,
       cashierId: map['cashierId'] as String?,
+      alertedChefAt: map['alertedChefAt'] == null
+          ? null
+          : DateTime.tryParse(map['alertedChefAt'] as String),
       cancelledAt: map['cancelledAt'] == null
           ? null
           : DateTime.tryParse(map['cancelledAt'] as String),

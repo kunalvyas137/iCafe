@@ -127,6 +127,18 @@ class PrinterService {
           styles: const PosStyles(align: PosAlign.right),
         ),
       ]);
+      if (item.modifiers.isNotEmpty) {
+        bytes += generator.text(
+          '   >> ${item.modifiers.join(", ")}',
+          styles: const PosStyles(align: PosAlign.left),
+        );
+      }
+      if (item.notes != null && item.notes!.trim().isNotEmpty) {
+        bytes += generator.text(
+          '   Note: ${item.notes!}',
+          styles: const PosStyles(align: PosAlign.left),
+        );
+      }
     }
     bytes += generator.hr();
 

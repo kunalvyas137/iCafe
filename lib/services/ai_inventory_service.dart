@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
 class AiInvoiceException implements Exception {
   AiInvoiceException(this.message);
@@ -12,19 +13,20 @@ class AiInvoiceException implements Exception {
   String toString() => message;
 }
 
-/// One line read off a vendor invoice, before it is matched to stock.
 class ParsedInvoiceLine {
   const ParsedInvoiceLine({
     required this.name,
     required this.quantity,
     this.unit = '',
     this.unitPrice,
+    this.type = 'raw_material',
   });
 
   final String name;
   final double quantity;
   final String unit;
   final double? unitPrice;
+  final String type;
 }
 
 class AiInventoryService {
@@ -37,16 +39,20 @@ class AiInventoryService {
 You are an expert OCR and inventory management assistant.
 Extract all line items from this vendor purchase invoice/receipt.
 For each item, provide the name, the quantity received, the unit of measure
-(kg, g, l, ml, pcs) and the unit price.
+(kg, g, l, ml, pcs), the unit price, and a classification type.
+The "type" must be exactly "mrp" if the item is a finished good sold directly to customers (e.g. cans of soda, bottled water), or exactly "raw_material" if it is an ingredient used to prepare other items (e.g. coffee beans, sugar, milk).
 Format the response strictly as a JSON array of objects with keys:
-"name" (string), "quantity" (number), "unit" (string), "price" (number).
+"name" (string), "quantity" (number), "unit" (string), "price" (number), "type" (string).
 Do not include any other text or markdown block formatting.
 ''';
 
-  /// Reads [imageFile] with Gemini and returns the line items it found.
+  /// Reads [bytes] with Gemini and returns the line items it found.
   /// Nothing is written to Firestore here — the caller reviews and matches the
   /// lines to raw materials first.
-  static Future<List<ParsedInvoiceLine>> scanInvoice(XFile imageFile) async {
+  static Future<List<ParsedInvoiceLine>> scanFile(
+    Uint8List bytes,
+    String mimeType,
+  ) async {
     if (!isConfigured) {
       throw AiInvoiceException(
         'No Gemini API key in this build. Rebuild with '
@@ -55,23 +61,51 @@ Do not include any other text or markdown block formatting.
     }
 
     final model = GenerativeModel(
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-flash-latest',
       apiKey: apiKey,
     );
 
-    final bytes = await imageFile.readAsBytes();
-    final mimeType = imageFile.mimeType ?? _mimeTypeFor(imageFile.name);
+    GenerateContentResponse? response;
+    int retries = 3;
+    while (retries > 0) {
+      try {
+        if (mimeType == 'application/pdf') {
+          // Upload the PDF to the File API first
+          final uri = Uri.parse("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$apiKey");
+          final request = http.Request('POST', uri);
+          request.headers['X-Goog-Upload-Protocol'] = 'raw';
+          request.headers['X-Goog-Upload-Header-Content-Type'] = mimeType;
+          request.bodyBytes = bytes;
+          
+          final uploadResp = await request.send();
+          final body = await uploadResp.stream.bytesToString();
+          if (uploadResp.statusCode != 200) {
+            throw AiInvoiceException('Failed to upload PDF to Gemini: $body');
+          }
+          
+          final json = jsonDecode(body);
+          final fileUri = Uri.parse(json['file']['uri'] as String);
 
-    final GenerateContentResponse response;
-    try {
-      response = await model.generateContent([
-        Content.multi([TextPart(_prompt), DataPart(mimeType, bytes)]),
-      ]);
-    } catch (e) {
-      throw AiInvoiceException('Could not reach Gemini: $e');
+          response = await model.generateContent([
+            Content.multi([TextPart(_prompt), FilePart(fileUri)]),
+          ]);
+        } else {
+          response = await model.generateContent([
+            Content.multi([TextPart(_prompt), DataPart(mimeType, bytes)]),
+          ]);
+        }
+        break; // Success, exit retry loop
+      } catch (e) {
+        if (e.toString().contains('503') && retries > 1) {
+          retries--;
+          await Future.delayed(const Duration(seconds: 2));
+          continue; // Retry on 503
+        }
+        throw AiInvoiceException('Could not reach Gemini: $e');
+      }
     }
 
-    final text = response.text;
+    final text = response?.text;
     if (text == null || text.trim().isEmpty) {
       throw AiInvoiceException('Gemini returned an empty response.');
     }
@@ -115,6 +149,7 @@ Do not include any other text or markdown block formatting.
           quantity: quantity == null || quantity <= 0 ? 1 : quantity,
           unit: (raw['unit'] ?? raw['uom'] ?? '').toString().trim(),
           unitPrice: _toDouble(raw['price'] ?? raw['unitPrice'] ?? raw['rate']),
+          type: (raw['type'] ?? 'raw_material').toString().trim().toLowerCase() == 'mrp' ? 'mrp' : 'raw_material',
         ),
       );
     }

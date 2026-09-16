@@ -67,10 +67,14 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Orders are append-only for staff; voiding an order is an admin action.
+    // Orders are append-only for staff.
+    // Staff may also transition status (pending→preparing, preparing→completed)
+    // by updating only the allowed kitchen-queue fields.
+    // Cancellation (writing cancelReason / cancelledBy) is admin-only.
     match /orders/{orderId} {
       allow read, create: if isStaff();
-      allow update: if isAdmin();
+      allow update: if isAdmin()
+        || (isStaff() && onlyChanges(['status', 'alertedChefAt']));
       allow delete: if false;
     }
 

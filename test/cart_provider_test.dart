@@ -114,4 +114,62 @@ void main() {
     expect(issues.first, contains('only 1 left'));
     expect(issues.last, contains('no longer in the catalogue'));
   });
+
+  test('updateItemModifiers updates modifiers and notes on a cart line', () {
+    final cart = CartProvider();
+    cart.addProduct(_product());
+
+    expect(cart.items.first.modifiers, isEmpty);
+    expect(cart.items.first.notes, isNull);
+
+    cart.updateItemModifiers(
+      index: 0,
+      modifiers: ['Oat Milk', 'Less Sugar (50%)'],
+      notes: 'Warm well',
+    );
+
+    expect(cart.items.first.modifiers, ['Oat Milk', 'Less Sugar (50%)']);
+    expect(cart.items.first.notes, 'Warm well');
+  });
+
+  test('items with different modifiers are tracked as distinct lines', () {
+    final cart = CartProvider();
+    final latte = _product(id: 'latte', name: 'Latte', currentStock: 5);
+
+    // Add 1 Latte with Oat Milk
+    cart.addProduct(latte, modifiers: ['Oat Milk']);
+    // Add 1 Latte with Almond Milk
+    cart.addProduct(latte, modifiers: ['Almond Milk']);
+
+    expect(cart.items, hasLength(2));
+    expect(cart.quantityOf('latte'), 2);
+    expect(cart.items[0].modifiers, ['Oat Milk']);
+    expect(cart.items[1].modifiers, ['Almond Milk']);
+
+    // Adding matching modifiers increments the matching line
+    cart.addProduct(latte, modifiers: ['Oat Milk']);
+    expect(cart.items, hasLength(2));
+    expect(cart.items[0].quantity, 2);
+    expect(cart.items[1].quantity, 1);
+    expect(cart.quantityOf('latte'), 3);
+  });
+
+  test('index-based increment, decrement, and removal operate on the correct line', () {
+    final cart = CartProvider();
+    final coffee = _product(id: 'c1', name: 'Coffee', currentStock: 10);
+    cart.addProduct(coffee, modifiers: ['Oat Milk']);
+    cart.addProduct(coffee, modifiers: ['No Sugar']);
+
+    cart.incrementQuantityAt(1);
+    expect(cart.items[1].quantity, 2);
+    expect(cart.items[0].quantity, 1);
+
+    cart.decrementQuantityAt(1);
+    expect(cart.items[1].quantity, 1);
+
+    final removed = cart.removeItemAt(0);
+    expect(removed?.item.modifiers, ['Oat Milk']);
+    expect(cart.items, hasLength(1));
+    expect(cart.items[0].modifiers, ['No Sugar']);
+  });
 }
