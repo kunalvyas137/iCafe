@@ -10,6 +10,7 @@ Product _product({
   double gstRate = 5,
   bool isAvailable = true,
   double currentStock = 10,
+  bool isTaxInclusive = false,
 }) {
   return Product(
     id: id,
@@ -19,6 +20,7 @@ Product _product({
     gstRate: gstRate,
     isAvailable: isAvailable,
     currentStock: currentStock,
+    isTaxInclusive: isTaxInclusive,
   );
 }
 
@@ -32,14 +34,29 @@ void main() {
     expect(cart.quantityOf('p1'), 2);
   });
 
-  test('totals include per-item GST', () {
+  test('totals include per-item GST (exclusive)', () {
     final cart = CartProvider();
-    cart.addProduct(_product(price: 100, gstRate: 5));
-    cart.addProduct(_product(id: 'p2', name: 'Bun', price: 50, gstRate: 12));
+    cart.addProduct(_product(price: 100, gstRate: 5, isTaxInclusive: false));
+    cart.addProduct(_product(id: 'p2', name: 'Bun', price: 50, gstRate: 12, isTaxInclusive: false));
 
     expect(cart.subtotal, 150);
     expect(cart.totalGst, closeTo(11, 0.0001));
     expect(cart.grandTotal, closeTo(161, 0.0001));
+  });
+
+  test('totals include per-item GST (inclusive)', () {
+    final cart = CartProvider();
+    cart.addProduct(_product(price: 100, gstRate: 5, isTaxInclusive: true));
+    cart.addProduct(_product(id: 'p2', name: 'Bun', price: 50, gstRate: 12, isTaxInclusive: true));
+
+    // 100 / 1.05 = 95.238
+    // 50 / 1.12 = 44.642
+    // totalWithoutGst = 139.88
+    // gstAmount = 10.119
+    // grandTotal = 150
+    expect(cart.subtotal, closeTo(139.8809, 0.0001));
+    expect(cart.totalGst, closeTo(10.1190, 0.0001));
+    expect(cart.grandTotal, closeTo(150, 0.0001));
   });
 
   test('cannot add more than the tracked stock', () {

@@ -58,6 +58,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.11.0
 
 # firebase_core_web 3.11.0 uses isA<JSObject>() on Object, which requires
 # Dart 3.12+. Flutter 3.38.4 ships Dart 3.10.3, so force the previous
@@ -113,3 +114,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  web:
+    generate: true
+    image_path: "assets/images/logo.jpg"
+    background_color: "#ffffff"
+    theme_color: "#ffffff"
+  image_path: "assets/images/logo.jpg"

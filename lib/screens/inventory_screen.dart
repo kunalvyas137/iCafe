@@ -786,6 +786,7 @@ class _ProductDialogState extends State<_ProductDialog> {
   late final TextEditingController _sku;
   late ProductType _type;
   late bool _isAvailable;
+  late bool _isTaxInclusive;
   String? _imageUrl;
 
   @override
@@ -797,8 +798,10 @@ class _ProductDialogState extends State<_ProductDialog> {
     _price = TextEditingController(
       text: product == null ? '' : product.price.toStringAsFixed(2),
     );
+    _type = product?.type ?? ProductType.mrp;
+    final initialGst = product?.gstRate ?? (_type == ProductType.mrp ? 5.0 : widget.defaultGstRate);
     _gstRate = TextEditingController(
-      text: (product?.gstRate ?? widget.defaultGstRate).toStringAsFixed(0),
+      text: initialGst.toStringAsFixed(0),
     );
     _stock = TextEditingController(
       text: (product?.currentStock ?? 0).toStringAsFixed(0),
@@ -807,8 +810,8 @@ class _ProductDialogState extends State<_ProductDialog> {
       text: (product?.reorderLevel ?? 0).toStringAsFixed(0),
     );
     _sku = TextEditingController(text: product?.sku ?? '');
-    _type = product?.type ?? ProductType.mrp;
     _isAvailable = product?.isAvailable ?? true;
+    _isTaxInclusive = product?.isTaxInclusive ?? (_type == ProductType.mrp);
     _imageUrl = product?.imageUrl;
   }
 
@@ -846,6 +849,7 @@ class _ProductDialogState extends State<_ProductDialog> {
       sku: _sku.text.trim().isEmpty ? null : _sku.text.trim(),
       imageUrl: _imageUrl,
       isAvailable: _isAvailable,
+      isTaxInclusive: _isTaxInclusive,
       currentStock: _type == ProductType.mrp
           ? double.parse(_stock.text.trim())
           : 0,
@@ -903,8 +907,21 @@ class _ProductDialogState extends State<_ProductDialog> {
                         child: Text('Raw Material (Kitchen Stock)'),
                       ),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _type = value ?? ProductType.mrp),
+                  onChanged: (value) {
+                    final newType = value ?? ProductType.mrp;
+                    setState(() {
+                      _type = newType;
+                      if (widget.forceNew || widget.product == null) {
+                        if (newType == ProductType.mrp) {
+                          _gstRate.text = '5';
+                          _isTaxInclusive = true;
+                        } else {
+                          _gstRate.text = widget.defaultGstRate.toStringAsFixed(0);
+                          _isTaxInclusive = false;
+                        }
+                      }
+                    });
+                  },
                 ),
                 TextFormField(
                   controller: _category,
@@ -969,6 +986,13 @@ class _ProductDialogState extends State<_ProductDialog> {
                   decoration: const InputDecoration(labelText: 'GST Rate (%)'),
                   keyboardType: TextInputType.number,
                   validator: (value) => _validateNumber(value, max: 100),
+                ),
+                CheckboxListTile(
+                  title: const Text('Tax inclusive in price'),
+                  value: _isTaxInclusive,
+                  onChanged: (val) => setState(() => _isTaxInclusive = val ?? true),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
                 ),
                 if (tracksStock) ...[
                   TextFormField(

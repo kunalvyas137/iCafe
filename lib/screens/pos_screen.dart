@@ -367,7 +367,7 @@ class _PosScreenState extends State<PosScreen> {
     return Consumer<CartProvider>(
       builder: (context, cart, child) {
         return Container(
-          color: Colors.grey[50],
+          color: Colors.white, // Apple clean white for side panels
           child: Column(
             children: [
               AppBar(
@@ -468,9 +468,9 @@ class _PosScreenState extends State<PosScreen> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: cart.isEmpty
-                              ? Colors.grey
-                              : Colors.green,
-                          foregroundColor: Colors.white,
+                              ? Colors.grey.shade300
+                              : const Color(0xFF34C759), // Apple Green
+                          foregroundColor: cart.isEmpty ? Colors.grey.shade500 : Colors.white,
                         ),
                         onPressed: cart.isEmpty
                             ? null

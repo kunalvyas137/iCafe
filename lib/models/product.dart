@@ -16,6 +16,7 @@ class Product {
   final String? category;
   final bool isSellable;
   final bool isIngredient;
+  final bool isTaxInclusive;
 
   Product({
     required this.id,
@@ -33,8 +34,10 @@ class Product {
     this.category,
     bool? isSellable,
     bool? isIngredient,
+    bool? isTaxInclusive,
   })  : isSellable = isSellable ?? (type != ProductType.rawMaterial),
-        isIngredient = isIngredient ?? (type == ProductType.rawMaterial);
+        isIngredient = isIngredient ?? (type == ProductType.rawMaterial),
+        isTaxInclusive = isTaxInclusive ?? (type == ProductType.mrp);
 
   Product copyWith({
     String? id,
@@ -52,6 +55,7 @@ class Product {
     String? category,
     bool? isSellable,
     bool? isIngredient,
+    bool? isTaxInclusive,
   }) {
     return Product(
       id: id ?? this.id,
@@ -69,6 +73,7 @@ class Product {
       category: category ?? this.category,
       isSellable: isSellable ?? this.isSellable,
       isIngredient: isIngredient ?? this.isIngredient,
+      isTaxInclusive: isTaxInclusive ?? this.isTaxInclusive,
     );
   }
 
@@ -175,6 +180,7 @@ class Product {
         'category': category!.trim(),
       'isSellable': isSellable,
       'isIngredient': isIngredient,
+      'isTaxInclusive': isTaxInclusive,
     };
   }
 
@@ -208,6 +214,7 @@ class Product {
       category: map['category'] as String?,
       isSellable: map['isSellable'] ?? defaultIsSellable,
       isIngredient: map['isIngredient'] ?? defaultIsIngredient,
+      isTaxInclusive: map['isTaxInclusive'] ?? (type == ProductType.mrp),
     );
   }
 }

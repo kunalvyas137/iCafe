@@ -58,9 +58,51 @@ class ICafeApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
-          colorSchemeSeed: Colors.amber,
-          textTheme: GoogleFonts.latoTextTheme(),
-          appBarTheme: const AppBarTheme(centerTitle: false),
+          colorSchemeSeed: const Color(0xFF007AFF), // Apple Blue
+          scaffoldBackgroundColor: const Color(0xFFF2F2F7), // iOS grouped background
+          textTheme: GoogleFonts.interTextTheme(),
+          appBarTheme: const AppBarTheme(
+            centerTitle: true,
+            backgroundColor: Color(0xFFF2F2F7),
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            iconTheme: IconThemeData(color: Color(0xFF007AFF)),
+            titleTextStyle: TextStyle(
+              color: Colors.black,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.4,
+            ),
+          ),
+          cardTheme: CardThemeData(
+            elevation: 0,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF007AFF),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF007AFF),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
         ),
         home: const AuthGate(),
       ),

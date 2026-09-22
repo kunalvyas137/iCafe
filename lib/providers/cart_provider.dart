@@ -74,6 +74,7 @@ class CartProvider with ChangeNotifier {
           gstRate: product.gstRate,
           modifiers: mods,
           notes: trimmedNotes,
+          isTaxInclusive: product.isTaxInclusive,
         ),
       );
     }

@@ -11,10 +11,23 @@ class OrderItem {
   final double gstRate;
   final List<String> modifiers;
   final String? notes;
+  final bool isTaxInclusive;
 
-  double get totalWithoutGst => price * quantity;
-  double get gstAmount => totalWithoutGst * (gstRate / 100);
-  double get totalWithGst => totalWithoutGst + gstAmount;
+  double get totalWithoutGst {
+    if (isTaxInclusive) {
+      return (price * quantity) / (1 + (gstRate / 100));
+    }
+    return price * quantity;
+  }
+
+  double get totalWithGst {
+    if (isTaxInclusive) {
+      return price * quantity;
+    }
+    return totalWithoutGst + (totalWithoutGst * (gstRate / 100));
+  }
+
+  double get gstAmount => totalWithGst - totalWithoutGst;
 
   OrderItem({
     required this.productId,
@@ -24,6 +37,7 @@ class OrderItem {
     required this.gstRate,
     this.modifiers = const [],
     this.notes,
+    this.isTaxInclusive = false,
   });
 
   OrderItem copyWith({
@@ -39,6 +53,7 @@ class OrderItem {
       gstRate: gstRate,
       modifiers: modifiers ?? this.modifiers,
       notes: notes ?? this.notes,
+      isTaxInclusive: isTaxInclusive,
     );
   }
 
@@ -49,6 +64,7 @@ class OrderItem {
       'price': price,
       'quantity': quantity,
       'gstRate': gstRate,
+      'isTaxInclusive': isTaxInclusive,
       if (modifiers.isNotEmpty) 'modifiers': modifiers,
       if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
     };
@@ -61,6 +77,7 @@ class OrderItem {
       price: (map['price'] ?? 0.0).toDouble(),
       quantity: map['quantity']?.toInt() ?? 0,
       gstRate: (map['gstRate'] ?? 0.0).toDouble(),
+      isTaxInclusive: map['isTaxInclusive'] ?? false,
       modifiers: (map['modifiers'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
