@@ -116,6 +116,20 @@ class CafeOrder {
   final String? cancelledBy;
   final String? cancelReason;
 
+  /// Units taken off each product at checkout, keyed by product id. Voiding
+  /// replays these instead of recomputing from the catalogue, which may have
+  /// changed since the sale.
+  final Map<String, double> productDeductions;
+
+  /// Raw material consumed at checkout, keyed by material id. Recorded for
+  /// the same reason as [productDeductions]: recipes get edited.
+  final Map<String, double> materialDeductions;
+
+  /// Whether the order carries a stock record at all. Orders written before
+  /// deductions were persisted do not, and have to be reversed from the
+  /// current catalogue instead.
+  final bool hasStockRecord;
+
   CafeOrder({
     required this.id,
     required this.timestamp,
@@ -136,6 +150,9 @@ class CafeOrder {
     this.cancelledAt,
     this.cancelledBy,
     this.cancelReason,
+    this.productDeductions = const {},
+    this.materialDeductions = const {},
+    this.hasStockRecord = false,
   });
 
   /// Human-friendly reference such as `#014`, reset every day.
@@ -193,6 +210,8 @@ class CafeOrder {
       if (cancelledAt != null) 'cancelledAt': cancelledAt!.toIso8601String(),
       if (cancelledBy != null) 'cancelledBy': cancelledBy,
       if (cancelReason != null) 'cancelReason': cancelReason,
+      'productDeductions': productDeductions,
+      'materialDeductions': materialDeductions,
     };
   }
 
@@ -229,6 +248,22 @@ class CafeOrder {
           : DateTime.tryParse(map['cancelledAt'] as String),
       cancelledBy: map['cancelledBy'] as String?,
       cancelReason: map['cancelReason'] as String?,
+      productDeductions: _readQuantities(map['productDeductions']),
+      materialDeductions: _readQuantities(map['materialDeductions']),
+      hasStockRecord:
+          map.containsKey('productDeductions') ||
+          map.containsKey('materialDeductions'),
     );
+  }
+
+  static Map<String, double> _readQuantities(dynamic value) {
+    if (value is! Map) return const {};
+    final quantities = <String, double>{};
+    value.forEach((key, quantity) {
+      if (key is String && quantity is num) {
+        quantities[key] = quantity.toDouble();
+      }
+    });
+    return quantities;
   }
 }
