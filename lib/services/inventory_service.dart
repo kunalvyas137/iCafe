@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/product.dart';
 import '../models/raw_material.dart';
 import '../models/recipe.dart';
+import 'unit_conversion.dart';
 
 /// An inventory change that was refused before anything was written.
 class InventoryException implements Exception {
@@ -257,90 +258,156 @@ class InventoryService {
 
   /// Books delivered items directly into unified products inventory.
   /// Any MRP/resale product is immediately available on POS with its selling price.
+  ///
+  /// The whole invoice lands in one transaction: if any line is refused —
+  /// a vanished target, a unit that cannot be converted into the item's own
+  /// unit — nothing is written, so a corrected retry never double-books the
+  /// lines that were fine.
   static Future<int> receiveStock(List<StockReceipt> receipts) async {
-    if (receipts.isEmpty) {
+    final lines = receipts.where((receipt) => receipt.quantity > 0).toList();
+    if (lines.isEmpty) {
       throw InventoryException('Nothing to receive.');
     }
 
-    var created = 0;
-    for (final receipt in receipts) {
-      if (receipt.quantity <= 0) continue;
-      final targetId = receipt.targetId;
-
-      if (targetId == null) {
-        // Create new item in unified products collection
-        final isSellable = receipt.isMrpProduct;
-        final sellPrice = receipt.price > 0 ? receipt.price * 1.5 : 10.0;
-        final newProduct = Product(
-          id: '',
-          name: receipt.name,
-          type: isSellable ? ProductType.mrp : ProductType.rawMaterial,
-          price: isSellable ? sellPrice : 0.0,
-          costPrice: receipt.price > 0 ? receipt.price : null,
-          gstRate: 0,
-          currentStock: receipt.quantity,
-          reorderLevel: 0,
-          unit: receipt.unit.isEmpty ? 'pcs' : receipt.unit,
-          isAvailable: true,
-          isSellable: isSellable,
-          isIngredient: !isSellable,
-        );
-        await createProduct(newProduct);
-        created++;
-      } else {
-        await _db.runTransaction<void>((transaction) async {
-          final prodRef = _products.doc(targetId);
-          final snap = await transaction.get(prodRef);
-          if (snap.exists) {
-            final data = snap.data()!;
-            final currentStock = (data['currentStock'] as num? ?? 0).toDouble();
-            final updates = <String, dynamic>{
-              'currentStock': currentStock + receipt.quantity,
-              if (receipt.price > 0) 'costPrice': receipt.price,
-            };
-            if (receipt.isMrpProduct) {
-              updates['isSellable'] = true;
-              updates['type'] = ProductType.mrp.name;
-              if ((data['price'] as num? ?? 0) <= 0 && receipt.price > 0) {
-                updates['price'] = receipt.price * 1.5;
-              }
-            }
-            transaction.update(prodRef, updates);
-
-            // Sync legacy raw_materials doc if present
-            final rawRef = _materials.doc(targetId);
-            final rawSnap = await transaction.get(rawRef);
-            if (rawSnap.exists) {
-              final rawStock = (rawSnap.data()?['currentStock'] as num? ?? 0).toDouble();
-              transaction.update(rawRef, {'currentStock': rawStock + receipt.quantity});
-            }
-          } else {
-            // Target was in legacy raw_materials
-            final rawRef = _materials.doc(targetId);
-            final rawSnap = await transaction.get(rawRef);
-            if (!rawSnap.exists) throw InventoryException('Item not found.');
-            final rawData = rawSnap.data()!;
-            final currentStock = (rawData['currentStock'] as num? ?? 0).toDouble();
-            final updatedStock = currentStock + receipt.quantity;
-            transaction.update(rawRef, {'currentStock': updatedStock});
-
-            // Mirror into products
-            final newProd = Product(
-              id: targetId,
-              name: rawData['name'] ?? receipt.name,
-              type: receipt.isMrpProduct ? ProductType.mrp : ProductType.rawMaterial,
-              unit: rawData['unit'] ?? receipt.unit,
-              currentStock: updatedStock,
-              reorderLevel: (rawData['reorderLevel'] ?? 0.0).toDouble(),
-              isSellable: receipt.isMrpProduct,
-              isIngredient: true,
-            );
-            transaction.set(prodRef, newProd.toMap());
-          }
-        });
+    return _db.runTransaction<int>((transaction) async {
+      // Every read before the first write, and each target read once even
+      // when several lines land on it.
+      final prodSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      final rawSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      for (final line in lines) {
+        final targetId = line.targetId;
+        if (targetId == null || prodSnaps.containsKey(targetId)) continue;
+        prodSnaps[targetId] = await transaction.get(_products.doc(targetId));
+        rawSnaps[targetId] = await transaction.get(_materials.doc(targetId));
       }
-    }
-    return created;
+
+      final problems = <String>[];
+      final additions = <String, double>{};
+      final updates = <String, Map<String, dynamic>>{};
+      final newProducts = <Product>[];
+
+      for (final line in lines) {
+        final targetId = line.targetId;
+        if (targetId == null) {
+          final isSellable = line.isMrpProduct;
+          final sellPrice = line.price > 0 ? line.price * 1.5 : 10.0;
+          newProducts.add(
+            Product(
+              id: _products.doc().id,
+              name: line.name,
+              type: isSellable ? ProductType.mrp : ProductType.rawMaterial,
+              price: isSellable ? sellPrice : 0.0,
+              costPrice: line.price > 0 ? line.price : null,
+              gstRate: 0,
+              currentStock: line.quantity,
+              reorderLevel: 0,
+              unit: line.unit.isEmpty ? 'pcs' : line.unit,
+              isAvailable: true,
+              isSellable: isSellable,
+              isIngredient: !isSellable,
+            ),
+          );
+          continue;
+        }
+
+        final data = prodSnaps[targetId]!.data() ?? rawSnaps[targetId]!.data();
+        if (data == null) {
+          problems.add('${line.name}: the selected item no longer exists.');
+          continue;
+        }
+        final targetUnit = (data['unit'] ?? 'pcs').toString();
+        final converted = convertQuantity(line.quantity, line.unit, targetUnit);
+        if (converted == null) {
+          problems.add(
+            '${line.name}: cannot add ${line.unit} to ${data['name']} stocked in $targetUnit.',
+          );
+          continue;
+        }
+        additions.update(
+          targetId,
+          (value) => value + converted,
+          ifAbsent: () => converted,
+        );
+
+        final update = updates.putIfAbsent(targetId, () => <String, dynamic>{});
+        if (line.price > 0) update['costPrice'] = line.price;
+        if (line.isMrpProduct) {
+          update['isSellable'] = true;
+          update['type'] = ProductType.mrp.name;
+          if ((data['price'] as num? ?? 0) <= 0 && line.price > 0) {
+            update['price'] = line.price * 1.5;
+          }
+        }
+      }
+
+      if (problems.isNotEmpty) {
+        throw InventoryException(problems.join('\n'));
+      }
+
+      additions.forEach((targetId, added) {
+        final prodSnap = prodSnaps[targetId]!;
+        final rawSnap = rawSnaps[targetId]!;
+        final prodData = prodSnap.data();
+        final rawData = rawSnap.data();
+        final extra = updates[targetId]!;
+
+        if (prodData != null) {
+          final currentStock = (prodData['currentStock'] as num? ?? 0).toDouble();
+          transaction.update(_products.doc(targetId), {
+            'currentStock': currentStock + added,
+            ...extra,
+          });
+          // Sync legacy raw_materials doc if present
+          if (rawData != null) {
+            final rawStock = (rawData['currentStock'] as num? ?? 0).toDouble();
+            transaction.update(_materials.doc(targetId), {
+              'currentStock': rawStock + added,
+            });
+          }
+        } else {
+          // Target only exists in legacy raw_materials; mirror into products.
+          final currentStock = (rawData!['currentStock'] as num? ?? 0).toDouble();
+          final updatedStock = currentStock + added;
+          transaction.update(_materials.doc(targetId), {
+            'currentStock': updatedStock,
+          });
+          final isMrp = extra['type'] == ProductType.mrp.name;
+          final mirrored = Product(
+            id: targetId,
+            name: rawData['name'] ?? '',
+            type: isMrp ? ProductType.mrp : ProductType.rawMaterial,
+            unit: (rawData['unit'] ?? 'pcs').toString(),
+            currentStock: updatedStock,
+            reorderLevel: (rawData['reorderLevel'] ?? 0.0).toDouble(),
+            isSellable: isMrp,
+            isIngredient: true,
+          );
+          transaction.set(_products.doc(targetId), {
+            ...mirrored.toMap(),
+            ...extra,
+          });
+        }
+      });
+
+      for (final product in newProducts) {
+        transaction.set(_products.doc(product.id), product.toMap()..['id'] = product.id);
+        if (product.isIngredient || product.type == ProductType.rawMaterial) {
+          transaction.set(
+            _materials.doc(product.id),
+            RawMaterial(
+              id: product.id,
+              name: product.name,
+              unit: product.unit,
+              currentStock: product.currentStock,
+              reorderLevel: product.reorderLevel,
+            ).toMap(),
+            SetOptions(merge: true),
+          );
+        }
+      }
+
+      return newProducts.length;
+    });
   }
 
   /// Adjusts stock for any inventory item (product or raw material) by [delta].

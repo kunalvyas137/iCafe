@@ -106,6 +106,36 @@ void main() {
     expect(restored.cashTendered, isNull);
   });
 
+  test('stock deductions round-trip and legacy orders are flagged', () {
+    final order = _order();
+    final withStock = CafeOrder(
+      id: order.id,
+      timestamp: order.timestamp,
+      items: order.items,
+      subtotal: order.subtotal,
+      totalGst: order.totalGst,
+      grandTotal: order.grandTotal,
+      paymentMethod: order.paymentMethod,
+      status: order.status,
+      productDeductions: const {'p1': 2},
+      materialDeductions: const {'milk': 0.25},
+      hasStockRecord: true,
+    );
+
+    final restored = CafeOrder.fromMap(withStock.toMap(), withStock.id);
+    expect(restored.hasStockRecord, isTrue);
+    expect(restored.productDeductions, {'p1': 2.0});
+    expect(restored.materialDeductions, {'milk': 0.25});
+
+    final legacyMap = order.toMap()
+      ..remove('productDeductions')
+      ..remove('materialDeductions');
+    final legacy = CafeOrder.fromMap(legacyMap, order.id);
+    expect(legacy.hasStockRecord, isFalse);
+    expect(legacy.productDeductions, isEmpty);
+    expect(legacy.materialDeductions, isEmpty);
+  });
+
   test('only completed orders count towards sales totals', () {
     final completed = _order();
     expect(completed.countsTowardsSales, isTrue);
