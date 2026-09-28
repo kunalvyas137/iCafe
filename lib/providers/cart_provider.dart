@@ -140,9 +140,11 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Puts a removed line back. A line is unique by product, modifiers and
+  /// notes, so if an identical line was rung up again in the meantime the
+  /// restored quantity merges into it instead of becoming a second line.
   void restoreItem(RemovedCartItem removed) {
-    final index = removed.index.clamp(0, _items.length);
-    _items.insert(index, removed.item);
+    _mergeIn(removed.item, at: removed.index);
     notifyListeners();
   }
 
@@ -153,19 +155,39 @@ class CartProvider with ChangeNotifier {
     return cleared;
   }
 
+  /// Puts a cleared cart back, merging into anything rung up since the clear
+  /// rather than discarding it.
   void restoreItems(List<OrderItem> items) {
     if (items.isEmpty) return;
-    _items
-      ..clear()
-      ..addAll(items);
+    for (final item in items) {
+      _mergeIn(item);
+    }
     notifyListeners();
+  }
+
+  void _mergeIn(OrderItem item, {int? at}) {
+    final index = _items.indexWhere(
+      (line) =>
+          line.productId == item.productId &&
+          listEquals(line.modifiers, item.modifiers) &&
+          (line.notes ?? '') == (item.notes ?? ''),
+    );
+    if (index >= 0) {
+      _items[index] = _items[index].copyWith(
+        quantity: _items[index].quantity + item.quantity,
+      );
+      return;
+    }
+    _items.insert((at ?? _items.length).clamp(0, _items.length), item);
   }
 
   /// Checks the cart against the current catalogue, returning one message per
   /// line item that can no longer be fulfilled.
   List<String> stockIssues(Map<String, Product> catalog) {
     final issues = <String>[];
+    final seen = <String>{};
     for (final item in _items) {
+      if (!seen.add(item.productId)) continue;
       final product = catalog[item.productId];
       if (product == null) {
         issues.add('${item.productName} is no longer in the catalogue.');
@@ -175,9 +197,10 @@ class CartProvider with ChangeNotifier {
         issues.add('${product.name} is marked unavailable.');
         continue;
       }
-      if (product.tracksStock && item.quantity > product.currentStock) {
+      final inCart = quantityOf(item.productId);
+      if (product.tracksStock && inCart > product.currentStock) {
         issues.add(
-          '${product.name}: only ${product.currentStock.toInt()} left, ${item.quantity} in cart.',
+          '${product.name}: only ${product.currentStock.toInt()} left, $inCart in cart.',
         );
       }
     }

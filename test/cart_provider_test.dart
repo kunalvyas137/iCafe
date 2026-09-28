@@ -108,6 +108,52 @@ void main() {
     expect(cart.items.map((i) => i.productId), ['a', 'b', 'c']);
   });
 
+  test('restoring a product that was re-added merges into the one line', () {
+    final cart = CartProvider();
+    cart.addProduct(_product(currentStock: 5), quantity: 5);
+
+    final removed = cart.removeProduct('p1');
+    cart.addProduct(_product(currentStock: 5), quantity: 5);
+    cart.restoreItem(removed!);
+
+    expect(cart.items, hasLength(1));
+    expect(cart.quantityOf('p1'), 10);
+  });
+
+  test('restoring keeps lines with different modifiers separate', () {
+    final cart = CartProvider();
+    cart.addProduct(_product(), modifiers: ['Oat milk']);
+
+    final removed = cart.removeItemAt(0);
+    cart.addProduct(_product());
+    cart.restoreItem(removed!);
+
+    expect(cart.items, hasLength(2));
+    expect(cart.quantityOf('p1'), 2);
+  });
+
+  test('restoring a cleared cart keeps what was rung up since', () {
+    final cart = CartProvider();
+    cart.addProduct(_product(id: 'a', name: 'A'));
+    final cleared = cart.clearCart();
+    cart.addProduct(_product(id: 'b', name: 'B'));
+
+    cart.restoreItems(cleared);
+
+    expect(cart.quantityOf('a'), 1);
+    expect(cart.quantityOf('b'), 1);
+  });
+
+  test('stockIssues counts a product across all of its lines', () {
+    final cart = CartProvider();
+    cart.addProduct(_product(currentStock: 5), quantity: 3);
+    cart.addProduct(_product(currentStock: 5), quantity: 2, modifiers: ['Extra shot']);
+
+    final issues = cart.stockIssues({'p1': _product(currentStock: 4)});
+    expect(issues, hasLength(1));
+    expect(issues.single, contains('5 in cart'));
+  });
+
   test('clearing returns the items so the clear can be undone', () {
     final cart = CartProvider();
     cart.addProduct(_product());

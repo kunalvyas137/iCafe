@@ -48,10 +48,24 @@ class OrderService {
       // Firestore requires every read to happen before the first write.
       final counterSnap = await transaction.get(counterRef);
 
-      final productSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      // Stock is validated and deducted per product, not per line: the same
+      // product appears on several lines when modifiers differ, and each
+      // line would otherwise pass the stock check on its own.
+      final quantities = <String, int>{};
+      final names = <String, String>{};
       for (final item in items) {
-        productSnaps[item.productId] = await transaction.get(
-          _db.collection('products').doc(item.productId),
+        quantities.update(
+          item.productId,
+          (value) => value + item.quantity,
+          ifAbsent: () => item.quantity,
+        );
+        names[item.productId] = item.productName;
+      }
+
+      final productSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      for (final productId in quantities.keys) {
+        productSnaps[productId] = await transaction.get(
+          _db.collection('products').doc(productId),
         );
       }
 
@@ -72,59 +86,57 @@ class OrderService {
       // Sum raw-material usage across lines first: two products can share an
       // ingredient, and Firestore forbids reading the same doc twice.
       final materialUsage = <String, double>{};
-      for (final item in items) {
-        final recipe = recipes[item.productId];
-        if (recipe == null) continue;
+      quantities.forEach((productId, quantity) {
+        final recipe = recipes[productId];
+        if (recipe == null) return;
         for (final ingredient in recipe.ingredients) {
           materialUsage.update(
             ingredient.rawMaterialId,
-            (value) => value + ingredient.quantity * item.quantity,
-            ifAbsent: () => ingredient.quantity * item.quantity,
+            (value) => value + ingredient.quantity * quantity,
+            ifAbsent: () => ingredient.quantity * quantity,
           );
         }
-      }
+      });
 
-      final materialSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
-      final materialInProducts = <String, bool>{};
-      for (final materialId in materialUsage.keys) {
-        var snap = await transaction.get(
-          _db.collection('products').doc(materialId),
-        );
-        if (snap.exists && snap.data() != null) {
-          materialSnaps[materialId] = snap;
-          materialInProducts[materialId] = true;
-        } else {
-          snap = await transaction.get(
-            _db.collection('raw_materials').doc(materialId),
-          );
-          materialSnaps[materialId] = snap;
-          materialInProducts[materialId] = false;
-        }
-      }
+      final materials = await _readMaterials(transaction, materialUsage.keys);
 
       // Validation, still before any write.
       final problems = <String>[];
-      for (final item in items) {
-        final snap = productSnaps[item.productId]!;
+      final productDeductions = <String, double>{};
+      quantities.forEach((productId, quantity) {
+        final snap = productSnaps[productId]!;
         final data = snap.data();
         if (data == null) {
-          problems.add('${item.productName} is no longer in the catalogue.');
-          continue;
+          problems.add('${names[productId]} is no longer in the catalogue.');
+          return;
         }
         final product = Product.fromMap(data, snap.id);
         if (!product.isAvailable) {
           problems.add('${product.name} is marked unavailable.');
-        } else if (product.tracksStock &&
-            item.quantity > product.currentStock) {
-          problems.add(
-            '${product.name}: only ${product.currentStock.toInt()} left, ${item.quantity} in cart.',
-          );
+          return;
         }
-      }
+        if (product.tracksStock && quantity > product.currentStock) {
+          problems.add(
+            '${product.name}: only ${product.currentStock.toInt()} left, $quantity in cart.',
+          );
+          return;
+        }
+        // An in-house product consumes stock only through its recipe, so
+        // selling one without a recipe would leave inventory overstated.
+        if (product.type == ProductType.inHouse &&
+            (recipes[productId]?.ingredients.isEmpty ?? true)) {
+          problems.add(
+            '${product.name} has no recipe, so its stock cannot be tracked.',
+          );
+          return;
+        }
+        if (product.type == ProductType.mrp) {
+          productDeductions[productId] = quantity.toDouble();
+        }
+      });
 
       materialUsage.forEach((materialId, required) {
-        final snap = materialSnaps[materialId]!;
-        final data = snap.data();
+        final data = materials[materialId]!.snapshot.data();
         if (data == null) {
           problems.add('A recipe ingredient ($materialId) is missing.');
           return;
@@ -170,6 +182,9 @@ class OrderService {
         tableLabel: _trimToNull(tableLabel),
         customerName: _trimToNull(customerName),
         cashierId: FirebaseAuth.instance.currentUser?.uid,
+        productDeductions: productDeductions,
+        materialDeductions: Map<String, double>.from(materialUsage),
+        hasStockRecord: true,
       );
 
       transaction.set(counterRef, {
@@ -179,30 +194,39 @@ class OrderService {
       });
       transaction.set(orderRef, order.toMap());
 
-      for (final item in items) {
-        final data = productSnaps[item.productId]!.data()!;
-        final product = Product.fromMap(data, item.productId);
-        if (product.type == ProductType.mrp) {
-          transaction.update(_db.collection('products').doc(item.productId), {
-            'currentStock': FieldValue.increment(-item.quantity),
-          });
-        }
-      }
+      productDeductions.forEach((productId, quantity) {
+        transaction.update(_db.collection('products').doc(productId), {
+          'currentStock': FieldValue.increment(-quantity),
+        });
+      });
 
       materialUsage.forEach((materialId, required) {
-        if (materialInProducts[materialId] == true) {
-          transaction.update(_db.collection('products').doc(materialId), {
-            'currentStock': FieldValue.increment(-required),
-          });
-        } else {
-          transaction.update(_db.collection('raw_materials').doc(materialId), {
-            'currentStock': FieldValue.increment(-required),
-          });
-        }
+        transaction.update(materials[materialId]!.ref, {
+          'currentStock': FieldValue.increment(-required),
+        });
       });
 
       return order;
     });
+  }
+
+  /// Ingredients live in `products` since the unified inventory, but older
+  /// ones may only exist in `raw_materials`; resolve each to wherever it is.
+  static Future<Map<String, _MaterialDoc>> _readMaterials(
+    Transaction transaction,
+    Iterable<String> materialIds,
+  ) async {
+    final result = <String, _MaterialDoc>{};
+    for (final materialId in materialIds) {
+      var ref = _db.collection('products').doc(materialId);
+      var snap = await transaction.get(ref);
+      if (!snap.exists || snap.data() == null) {
+        ref = _db.collection('raw_materials').doc(materialId);
+        snap = await transaction.get(ref);
+      }
+      result[materialId] = _MaterialDoc(ref, snap);
+    }
+    return result;
   }
 
   /// Orders placed inside [day], newest first.
@@ -290,57 +314,17 @@ class OrderService {
         throw CheckoutException('This order is already cancelled.');
       }
 
-      final productSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
-      for (final item in current.items) {
-        productSnaps[item.productId] ??= await transaction.get(
-          _db.collection('products').doc(item.productId),
-        );
+      // Replay the exact movements recorded at checkout. Only orders that
+      // predate the stock record fall back to the current catalogue.
+      var productReturns = current.productDeductions;
+      var materialReturns = current.materialDeductions;
+      if (!current.hasStockRecord) {
+        final legacy = await _legacyReturns(transaction, current);
+        productReturns = legacy.products;
+        materialReturns = legacy.materials;
       }
 
-      final recipes = <String, Recipe>{};
-      for (final entry in productSnaps.entries) {
-        final productData = entry.value.data();
-        if (productData == null) continue;
-        if (productData['type'] != ProductType.inHouse.name) continue;
-        final recipeSnap = await transaction.get(
-          _db.collection('recipes').doc(entry.key),
-        );
-        final recipeData = recipeSnap.data();
-        if (recipeData != null) {
-          recipes[entry.key] = Recipe.fromMap(recipeData, recipeSnap.id);
-        }
-      }
-
-      final materialReturns = <String, double>{};
-      for (final item in current.items) {
-        final recipe = recipes[item.productId];
-        if (recipe == null) continue;
-        for (final ingredient in recipe.ingredients) {
-          materialReturns.update(
-            ingredient.rawMaterialId,
-            (value) => value + ingredient.quantity * item.quantity,
-            ifAbsent: () => ingredient.quantity * item.quantity,
-          );
-        }
-      }
-
-      final materialReturnSnaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
-      final materialInProducts = <String, bool>{};
-      for (final materialId in materialReturns.keys) {
-        var snap = await transaction.get(
-          _db.collection('products').doc(materialId),
-        );
-        if (snap.exists && snap.data() != null) {
-          materialReturnSnaps[materialId] = snap;
-          materialInProducts[materialId] = true;
-        } else {
-          snap = await transaction.get(
-            _db.collection('raw_materials').doc(materialId),
-          );
-          materialReturnSnaps[materialId] = snap;
-          materialInProducts[materialId] = false;
-        }
-      }
+      final materials = await _readMaterials(transaction, materialReturns.keys);
 
       final cancelled = CafeOrder(
         id: current.id,
@@ -361,6 +345,9 @@ class OrderService {
         cancelledAt: now ?? DateTime.now(),
         cancelledBy: FirebaseAuth.instance.currentUser?.uid,
         cancelReason: reason.trim(),
+        productDeductions: current.productDeductions,
+        materialDeductions: current.materialDeductions,
+        hasStockRecord: current.hasStockRecord,
       );
 
       transaction.update(orderRef, {
@@ -370,33 +357,82 @@ class OrderService {
         'cancelReason': cancelled.cancelReason,
       });
 
-      for (final item in current.items) {
-        final productData = productSnaps[item.productId]?.data();
-        if (productData == null) continue;
-        if (productData['type'] != ProductType.mrp.name) continue;
-        transaction.update(_db.collection('products').doc(item.productId), {
-          'currentStock': FieldValue.increment(item.quantity),
+      productReturns.forEach((productId, quantity) {
+        transaction.update(_db.collection('products').doc(productId), {
+          'currentStock': FieldValue.increment(quantity),
         });
-      }
+      });
 
       materialReturns.forEach((materialId, quantity) {
-        if (materialInProducts[materialId] == true) {
-          transaction.update(_db.collection('products').doc(materialId), {
-            'currentStock': FieldValue.increment(quantity),
-          });
-        } else {
-          transaction.update(_db.collection('raw_materials').doc(materialId), {
-            'currentStock': FieldValue.increment(quantity),
-          });
-        }
+        final material = materials[materialId]!;
+        if (!material.snapshot.exists) return;
+        transaction.update(material.ref, {
+          'currentStock': FieldValue.increment(quantity),
+        });
       });
 
       return cancelled;
     });
   }
 
+  /// Reconstructs what an order written before deductions were persisted
+  /// would have taken, from the catalogue and recipes as they stand today.
+  static Future<_StockReturns> _legacyReturns(
+    Transaction transaction,
+    CafeOrder order,
+  ) async {
+    final quantities = <String, int>{};
+    for (final item in order.items) {
+      quantities.update(
+        item.productId,
+        (value) => value + item.quantity,
+        ifAbsent: () => item.quantity,
+      );
+    }
+
+    final products = <String, double>{};
+    final materials = <String, double>{};
+    for (final entry in quantities.entries) {
+      final snap = await transaction.get(
+        _db.collection('products').doc(entry.key),
+      );
+      final data = snap.data();
+      if (data == null) continue;
+      if (data['type'] == ProductType.mrp.name) {
+        products[entry.key] = entry.value.toDouble();
+        continue;
+      }
+      if (data['type'] != ProductType.inHouse.name) continue;
+      final recipeSnap = await transaction.get(
+        _db.collection('recipes').doc(entry.key),
+      );
+      final recipeData = recipeSnap.data();
+      if (recipeData == null) continue;
+      for (final ingredient in Recipe.fromMap(recipeData, recipeSnap.id).ingredients) {
+        materials.update(
+          ingredient.rawMaterialId,
+          (value) => value + ingredient.quantity * entry.value,
+          ifAbsent: () => ingredient.quantity * entry.value,
+        );
+      }
+    }
+    return _StockReturns(products, materials);
+  }
+
   static String? _trimToNull(String? value) {
     final trimmed = value?.trim();
     return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
   }
+}
+
+class _MaterialDoc {
+  const _MaterialDoc(this.ref, this.snapshot);
+  final DocumentReference<Map<String, dynamic>> ref;
+  final DocumentSnapshot<Map<String, dynamic>> snapshot;
+}
+
+class _StockReturns {
+  const _StockReturns(this.products, this.materials);
+  final Map<String, double> products;
+  final Map<String, double> materials;
 }

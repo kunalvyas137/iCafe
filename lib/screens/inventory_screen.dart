@@ -10,6 +10,7 @@ import '../models/store_settings.dart';
 import '../services/ai_inventory_service.dart';
 import '../services/inventory_service.dart';
 import '../services/invoice_matcher.dart';
+import '../services/unit_conversion.dart';
 import '../services/settings_service.dart';
 import '../widgets/product_image_picker.dart';
 
@@ -1640,9 +1641,23 @@ class _InvoiceReviewDialogState extends State<_InvoiceReviewDialog> {
       if (_types[i] == 'mrp') {
         _matches[i] = matchProduct(line, _mrpProducts)?.id;
       } else {
-        _matches[i] = matchMaterial(line, materials)?.id;
+        final material = matchMaterial(line, materials);
+        _matches[i] = material != null &&
+                unitsAreCompatible(line.unit, material.unit)
+            ? material.id
+            : null;
       }
     }
+  }
+
+  String? _unitProblem(int index) {
+    final targetId = _matches[index];
+    if (targetId == null) return null;
+    final line = widget.lines[index];
+    final material = _materials.where((m) => m.id == targetId).firstOrNull;
+    if (material == null) return null;
+    if (unitsAreCompatible(line.unit, material.unit)) return null;
+    return '${line.name}: ${line.unit.isEmpty ? 'unit' : line.unit} cannot be added to ${material.name} stocked in ${material.unit}.';
   }
 
   Product? matchProduct(ParsedInvoiceLine line, List<Product> products) {
@@ -1662,7 +1677,14 @@ class _InvoiceReviewDialogState extends State<_InvoiceReviewDialog> {
       final line = widget.lines[i];
       final isMrpProduct = _types[i] == 'mrp';
       final targetId = _matches[i];
-      
+      final unitProblem = _unitProblem(i);
+      if (unitProblem != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(unitProblem)),
+        );
+        return;
+      }
+
       receipts.add(
         StockReceipt(
           name: line.name,
