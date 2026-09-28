@@ -48,3 +48,16 @@ app.*.map.json
 macos/build/
 macos/Pods/
 macos/Flutter/ephemeral/
+
+# Firebase CLI cache
+.firebase/
+
+# Scratch / local test scripts (may contain API keys)
+test_fp.dart
+test_fp2.dart
+test_fp3.dart
+test_gemini_*.dart
+make_sounds.py
+
+# Exported data files
+users.json

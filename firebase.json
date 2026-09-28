@@ -3,6 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
+    "site": "icafe-29a92",
     "public": "build/web",
     "ignore": [
       "firebase.json",
